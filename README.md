@@ -236,9 +236,9 @@ values above, then restart `sddm`.
 - On systems where all display-class PCI devices are NVIDIA, removes
   non-NVIDIA GPU runtime packages such as `vulkan-intel` and `vulkan-radeon`
   before installing the NVIDIA runtime.
-- Offloads bulky `/usr/share` assets to `/home/.steamos-nvidia/offload` with
-  persistent bind mounts, freeing enough root space for pacman's normal NVIDIA
-  runtime transaction.
+- Offloads bulky `/usr/share` assets and Steam's user-space runtime to
+  `/home/.steamos-nvidia/offload` with persistent bind mounts, freeing enough
+  root space for pacman's normal NVIDIA runtime transaction.
 - Compresses the Btrfs root paths that matter for the runtime install so pacman
   has enough space on SteamOS's small root partition.
 - Installs the display/gaming runtime packages, excluding OpenCL by default.
@@ -253,9 +253,10 @@ values above, then restart `sddm`.
   mode.
 - Installs `/etc/steamos-nvidia/install` and an `/etc` systemd ensure service.
   If a SteamOS update boots a root slot without the NVIDIA module/runtime, the
-  service reruns this installer before the display manager starts. If reinstall
-  fails, it enables SSH and removes the NVIDIA-only boot config so the machine
-  can fall back to Nouveau instead of black-screening.
+  service reruns this installer before the display manager starts, then performs
+  one activation reboot so the new module binds. If it remains inactive after
+  that reboot, it enables SSH and removes the NVIDIA-only boot config so the
+  machine can fall back to Nouveau instead of black-screening.
 - Writes `/etc/atomic-update.conf.d/90-steamos-nvidia.conf` so SteamOS's
   atomic updater keeps the NVIDIA config, repair service, SSH enablement,
   DKMS configuration, Gamescope override, and bind-mount configuration across

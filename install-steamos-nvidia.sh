@@ -307,8 +307,12 @@ offload_root_directory() {
 
 offload_runtime_space() {
   offload_root_directory /usr/share/fonts usr-share-fonts
+  offload_root_directory /usr/share/icons usr-share-icons
+  offload_root_directory /usr/share/ibus usr-share-ibus
   offload_root_directory /usr/share/locale usr-share-locale
+  offload_root_directory /usr/share/qt6 usr-share-qt6
   offload_root_directory /usr/share/wallpapers usr-share-wallpapers
+  offload_root_directory /usr/lib/steam usr-lib-steam
   sync
   btrfs filesystem sync / >/dev/null 2>&1 || true
 }
@@ -420,7 +424,8 @@ exec "$patched_script" "$@"
 EOF
   chmod 0755 /etc/steamos-nvidia/gamescope-session
 
-  cat >/etc/systemd/user/gamescope-session.service.d/90-steamos-nvidia-display.conf <<'EOF'
+  # Keep the launch override separate from the user-owned display-mode drop-in.
+  cat >/etc/systemd/user/gamescope-session.service.d/90-steamos-nvidia.conf <<'EOF'
 [Service]
 ExecStart=
 ExecStart=/etc/steamos-nvidia/gamescope-session
@@ -484,9 +489,16 @@ set -Eeuo pipefail
 
 PERSISTENT_INSTALL=$PERSISTENT_INSTALL
 FALLBACK_MARKER=$FALLBACK_MARKER
+ACTIVATION_MARKER=$STATE_DIR/nvidia-activation-reboot-requested
 
-if modinfo nvidia >/dev/null 2>&1 && command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
-  rm -f "\$FALLBACK_MARKER"
+nvidia_active() {
+  command -v nvidia-smi >/dev/null 2>&1 || return 1
+  nvidia-smi >/dev/null 2>&1 || return 1
+  ! lsmod | awk '{print \$1}' | grep -qx nouveau
+}
+
+if nvidia_active; then
+  rm -f "\$FALLBACK_MARKER" "\$ACTIVATION_MARKER"
   exit 0
 fi
 
@@ -494,22 +506,33 @@ logger -t steamos-nvidia-ensure "NVIDIA stack is missing; attempting reinstall"
 systemctl enable --now sshd.service >/dev/null 2>&1 || true
 systemctl enable --now sshd.socket >/dev/null 2>&1 || true
 
-# After a SteamOS atomic update, the new root slot can have the old kernel
-# config but no DKMS-built NVIDIA module or runtime packages. Re-run the
-# persisted installer before display-manager starts so SSH remains reachable
-# and the graphical session does not boot into a driverless black screen.
+installer_succeeded=0
 if [[ -x "\$PERSISTENT_INSTALL" ]]; then
   if STEAMOS_NVIDIA_REBOOT=no "\$PERSISTENT_INSTALL"; then
-    rm -f "\$FALLBACK_MARKER"
-    exit 0
+    installer_succeeded=1
   fi
 fi
 
-if [[ -x /etc/steamos-nvidia/install ]]; then
+if (( ! installer_succeeded )) && [[ -x /etc/steamos-nvidia/install ]]; then
   if STEAMOS_NVIDIA_REBOOT=no /etc/steamos-nvidia/install; then
-    rm -f "\$FALLBACK_MARKER"
+    installer_succeeded=1
+  fi
+fi
+
+if (( installer_succeeded )); then
+  if nvidia_active; then
+    rm -f "\$FALLBACK_MARKER" "\$ACTIVATION_MARKER"
     exit 0
   fi
+
+  if [[ ! -e "\$ACTIVATION_MARKER" ]]; then
+    touch "\$ACTIVATION_MARKER"
+    logger -t steamos-nvidia-ensure "NVIDIA installed; rebooting once to activate the new kernel module"
+    systemctl reboot
+    exit 0
+  fi
+
+  logger -t steamos-nvidia-ensure "NVIDIA remained inactive after its activation reboot"
 fi
 
 logger -t steamos-nvidia-ensure "NVIDIA reinstall failed; removing NVIDIA-only boot config"
@@ -577,6 +600,7 @@ write_atomic_update_keep_list() {
 /etc/systemd/system/multi-user.target.wants/steamos-nvidia-ensure.service
 /etc/systemd/system/sockets.target.wants/sshd.socket
 /etc/systemd/system/steamos-nvidia-ensure.service
+/etc/systemd/user/gamescope-session.service.d/90-steamos-nvidia.conf
 /etc/systemd/user/gamescope-session.service.d/90-steamos-nvidia-display.conf
 EOF
 }
