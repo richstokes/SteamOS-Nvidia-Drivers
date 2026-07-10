@@ -1,24 +1,158 @@
 # SteamOS-Nvidia-Drivers
-Mad hacks to get SteamOS working on my Nvidia PC
+
+Instructions and scripts for installing SteamOS on a PC with an NVIDIA GPU.
 
 ## Current status
 
-This repo contains an experimental installer for SteamOS 3.x systems with an
-NVIDIA desktop GPU. It has been tested on SteamOS 3.8.14 with:
+This is extremely experimental. I mostly did this to see if I could. It works
+on my machine, but there are absolutely no guarantees.
+
+SteamOS does not officially support NVIDIA desktop GPUs. Expect rough edges,
+especially around Gamescope, display modes, HDR, VRR, and SteamOS updates.
+
+Tested from a MacBook against a fresh SteamOS 3.8.14 PC install with:
 
 - Kernel: `6.16.12-valve24.4-1-neptune-616`
 - GPU: GeForce RTX 4090
 - Driver packages from SteamOS repos: `575.64.05`
 
-SteamOS does not officially support this setup. Expect to rerun the installer
-after major SteamOS updates, especially when the kernel changes.
+You need another machine that can run scripts and SSH into the SteamOS PC.
 
-## Install
+## End-To-End Install Path
+
+### 1. Download A SteamOS Recovery Image
+
+Download the latest Steam Deck recovery/OOBE repair image from:
+
+https://steamdeck-images.steamos.cloud/recovery/
+
+For example:
 
 ```bash
-chmod +x install-steamos-nvidia.sh
-sudo ./install-steamos-nvidia.sh
+steamdeck-oobe-repair-20260707.10-3.8.14.img.bz2
 ```
+
+### 2. Flash And Install SteamOS
+
+Flash the image to a USB stick and boot the target PC from it.
+
+This will wipe the target PC. I recommend physically disconnecting or removing
+any drives that contain data you care about before installing.
+
+After install, one of two things usually happens:
+
+- You get a working desktop and can enable SSH normally.
+- You get a black screen or an unresponsive keyboard before you can enable SSH.
+
+If you get a working desktop, enable SSH from SteamOS. One common route is:
+
+```bash
+sudo systemctl enable --now sshd
+```
+
+If you cannot reach a working desktop, create an SSH-enabled SteamOS image
+before flashing.
+
+### 3. Optional: Create An SSH-Enabled Image
+
+`patch-steamos-ssh-admin.sh` patches a SteamOS image so it boots with SSH
+enabled and a sudo-capable admin user.
+
+Default credentials:
+
+```text
+username: steamosadmin
+password: steamtest123
+```
+
+The patch script requires Docker on the machine doing the patching.
+
+First decompress the image:
+
+```bash
+bunzip2 -k steamdeck-oobe-repair-20260707.10-3.8.14.img.bz2
+```
+
+Then create a patched copy:
+
+```bash
+chmod +x patch-steamos-ssh-admin.sh
+
+./patch-steamos-ssh-admin.sh \
+  --output steamdeck-oobe-repair-20260707.10-3.8.14-ssh.img \
+  steamdeck-oobe-repair-20260707.10-3.8.14.img
+```
+
+Use `--user` and `--password` if you want different temporary credentials.
+
+Flash the `*-ssh.img` file to USB and install SteamOS from that USB stick.
+After first boot, SSH should be available:
+
+```bash
+ssh steamosadmin@<steam-pc-ip>
+```
+
+### 4. Install The NVIDIA Driver Remotely
+
+Once SSH is enabled, copy `install-steamos-nvidia.sh` to the SteamOS PC and run
+it there with sudo.
+
+Set these values for your machine:
+
+```bash
+STEAMOS_HOST=192.168.1.75
+STEAMOS_USER=steamosadmin
+```
+
+Copy and run the installer:
+
+```bash
+scp install-steamos-nvidia.sh "$STEAMOS_USER@$STEAMOS_HOST:/tmp/"
+
+ssh "$STEAMOS_USER@$STEAMOS_HOST" \
+  'chmod +x /tmp/install-steamos-nvidia.sh && sudo STEAMOS_NVIDIA_REBOOT=yes /tmp/install-steamos-nvidia.sh'
+```
+
+If you enabled SSH for the normal `deck` user instead, set
+`STEAMOS_USER=deck`.
+
+The installer may take a while. It installs temporary build dependencies,
+builds the NVIDIA DKMS module for the running SteamOS kernel, removes the build
+dependencies again, installs the NVIDIA runtime, writes persistence hooks, and
+then reboots if `STEAMOS_NVIDIA_REBOOT=yes` is set.
+
+If you prefer to reboot manually, use:
+
+```bash
+ssh "$STEAMOS_USER@$STEAMOS_HOST" \
+  'chmod +x /tmp/install-steamos-nvidia.sh && sudo STEAMOS_NVIDIA_REBOOT=no /tmp/install-steamos-nvidia.sh'
+```
+
+Then reboot the SteamOS PC yourself.
+
+Useful environment overrides:
+
+```bash
+# Use the proprietary DKMS kernel module package instead of NVIDIA's open module package.
+STEAMOS_NVIDIA_DKMS_PACKAGE=nvidia-dkms sudo ./install-steamos-nvidia.sh
+
+# Reboot automatically after installation.
+STEAMOS_NVIDIA_REBOOT=yes sudo ./install-steamos-nvidia.sh
+```
+
+### 5. Verify
+
+After the SteamOS PC reboots, SSH back in and check:
+
+```bash
+ssh "$STEAMOS_USER@$STEAMOS_HOST" \
+  'lspci -nnk | sed -n "/VGA\\|3D\\|Display/,+5p"; nvidia-smi'
+```
+
+The NVIDIA PCI device should show `Kernel driver in use: nvidia`, and
+`nvidia-smi` should list the GPU.
+
+## Installer Notes
 
 The installer uses normal pacman installs for the NVIDIA runtime. DKMS build
 state and temporary build files are moved off SteamOS's tiny `/var` partition,
@@ -41,16 +175,6 @@ root partition can comfortably transact, the installer offloads
 but their storage lives on the large home partition.
 OpenCL packages are not installed by default because they are not needed for
 Steam gaming and make the root partition fit much tighter.
-
-Useful environment overrides:
-
-```bash
-# Use the proprietary DKMS kernel module package instead of NVIDIA's open module package.
-STEAMOS_NVIDIA_DKMS_PACKAGE=nvidia-dkms sudo ./install-steamos-nvidia.sh
-
-# Reboot automatically after installation.
-STEAMOS_NVIDIA_REBOOT=yes sudo ./install-steamos-nvidia.sh
-```
 
 ## What the installer does
 
@@ -98,7 +222,7 @@ STEAMOS_NVIDIA_REBOOT=yes sudo ./install-steamos-nvidia.sh
   A/B root updates.
 - Rebuilds initramfs and enables `nvidia-persistenced`.
 
-## Verify
+## Manual Verification
 
 After reboot:
 
