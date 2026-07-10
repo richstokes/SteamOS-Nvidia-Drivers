@@ -468,6 +468,10 @@ verify_install() {
 install_persistence_hooks() {
   log "Installing persistence hooks"
   install -d -m 0755 "$STATE_DIR" /etc/steamos-nvidia /etc/systemd/system
+
+  # SteamOS updates switch to a freshly populated A/B root slot. Keep runnable
+  # installer copies both in persistent /home state and in /etc so either side
+  # of the atomic-update migration can repair the NVIDIA stack on first boot.
   install_self "$PERSISTENT_INSTALL"
   install_self /etc/steamos-nvidia/install
 
@@ -487,6 +491,10 @@ logger -t steamos-nvidia-ensure "NVIDIA stack is missing; attempting reinstall"
 systemctl enable --now sshd.service >/dev/null 2>&1 || true
 systemctl enable --now sshd.socket >/dev/null 2>&1 || true
 
+# After a SteamOS atomic update, the new root slot can have the old kernel
+# config but no DKMS-built NVIDIA module or runtime packages. Re-run the
+# persisted installer before display-manager starts so SSH remains reachable
+# and the graphical session does not boot into a driverless black screen.
 if [[ -x "\$PERSISTENT_INSTALL" ]]; then
   if STEAMOS_NVIDIA_REBOOT=no "\$PERSISTENT_INSTALL"; then
     rm -f "\$FALLBACK_MARKER"
@@ -548,6 +556,10 @@ write_atomic_update_keep_list() {
   fi
 
   log "Writing SteamOS atomic update keep-list"
+  # SteamOS does not migrate all local /etc changes between atomic root slots.
+  # This allow-list is the durable handoff: atomupd copies these files into the
+  # next slot, then steamos-nvidia-ensure.service rebuilds/reinstalls whatever
+  # pacman/DKMS state the new root still lacks.
   cat >/etc/atomic-update.conf.d/90-steamos-nvidia.conf <<'EOF'
 /etc/atomic-update.conf.d/90-steamos-nvidia.conf
 /etc/dkms/framework.conf.d/90-steamos-nvidia.conf

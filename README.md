@@ -94,7 +94,8 @@ STEAMOS_NVIDIA_REBOOT=yes sudo ./install-steamos-nvidia.sh
   can fall back to Nouveau instead of black-screening.
 - Writes `/etc/atomic-update.conf.d/90-steamos-nvidia.conf` so SteamOS's
   atomic updater keeps the NVIDIA config, repair service, SSH enablement,
-  DKMS configuration, and bind-mount configuration across A/B root updates.
+  DKMS configuration, Gamescope override, and bind-mount configuration across
+  A/B root updates.
 - Rebuilds initramfs and enables `nvidia-persistenced`.
 
 ## Verify
@@ -119,11 +120,22 @@ boots a clean root slot, the service reruns `/home/.steamos-nvidia/install` with
 `STEAMOS_NVIDIA_REBOOT=no`, reinstalling build tools only for the rebuild and
 removing them again before installing the runtime.
 
-SteamOS 3.6 and newer only migrates selected `/etc` changes during atomic
-updates. The installer therefore writes an additional keep-list at
-`/etc/atomic-update.conf.d/90-steamos-nvidia.conf`. This is required for the
-repair service, Nouveau blacklist, SSH enablement, DKMS config, and bind mounts
-to survive the first post-install SteamOS update.
+SteamOS atomic updates boot into a newly populated A/B root slot. Files under
+`/home` survive, but local changes in `/etc` only survive when SteamOS's
+atomic updater is told to migrate them. The installer handles this in two
+parts:
+
+1. It writes `/etc/atomic-update.conf.d/90-steamos-nvidia.conf` so atomupd
+   copies the NVIDIA boot config, DKMS config, SSH enablement, repair service,
+   Gamescope override, and bind mounts into the next root slot.
+2. It enables `steamos-nvidia-ensure.service` before the display manager. On
+   first boot after an update, that service checks whether the NVIDIA module
+   and runtime are actually usable. If the new root slot is missing pacman/DKMS
+   state, it reruns the persistent installer from `/home/.steamos-nvidia/install`
+   with `STEAMOS_NVIDIA_REBOOT=no`.
+
+The keep-list preserves the configuration handoff; the ensure service performs
+the rebuild/reinstall that a fresh root slot may still need.
 
 If SteamOS updates into a black screen, try a local TTY with `Ctrl+Alt+F2` or
 `Ctrl+Alt+F3`, log in, and re-enable SSH:
