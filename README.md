@@ -79,6 +79,14 @@ STEAMOS_NVIDIA_REBOOT=yes sudo ./install-steamos-nvidia.sh
   has enough space on SteamOS's small root partition.
 - Installs the display/gaming runtime packages, excluding OpenCL by default.
 - Blacklists Nouveau and enables `nvidia_drm` modeset/fbdev.
+- Installs a Gamescope session override that keeps Valve's current SteamOS
+  wrapper but patches the launch at runtime for NVIDIA: HDR, VRR, and
+  Gamescope color-management advertising are disabled, and the physical output
+  is constrained to 1920x1080@60 by default. Override with
+  `STEAMOS_NVIDIA_GAMESCOPE_OUTPUT_WIDTH`,
+  `STEAMOS_NVIDIA_GAMESCOPE_OUTPUT_HEIGHT`, and
+  `STEAMOS_NVIDIA_GAMESCOPE_REFRESH` if your display path is stable at a higher
+  mode.
 - Installs `/etc/steamos-nvidia/install` and an `/etc` systemd ensure service.
   If a SteamOS update boots a root slot without the NVIDIA module/runtime, the
   service reruns this installer before the display manager starts. If reinstall

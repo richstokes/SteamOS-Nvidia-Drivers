@@ -355,6 +355,83 @@ LIBVA_DRIVER_NAME=nvidia
 EOF
 }
 
+install_gamescope_session_override() {
+  if [[ ! -x /usr/lib/steamos/gamescope-session ]]; then
+    log "SteamOS Gamescope session wrapper not found; skipping Gamescope override"
+    return 0
+  fi
+
+  log "Installing NVIDIA-friendly Gamescope session override"
+  install -d -m 0755 /etc/steamos-nvidia /etc/systemd/user/gamescope-session.service.d
+
+  cat >/etc/steamos-nvidia/gamescope-session <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+source_script=/usr/lib/steamos/gamescope-session
+width=${STEAMOS_NVIDIA_GAMESCOPE_OUTPUT_WIDTH:-1920}
+height=${STEAMOS_NVIDIA_GAMESCOPE_OUTPUT_HEIGHT:-1080}
+refresh=${STEAMOS_NVIDIA_GAMESCOPE_REFRESH:-60}
+
+[[ $width =~ ^[0-9]+$ ]] || width=1920
+[[ $height =~ ^[0-9]+$ ]] || height=1080
+[[ $refresh =~ ^[0-9]+([.][0-9]+)?$ ]] || refresh=60
+
+tmp_parent=${XDG_RUNTIME_DIR:-/tmp}
+patched_script=$(mktemp -p "$tmp_parent" steamos-nvidia-gamescope-session.XXXXXX)
+trap 'rm -f "$patched_script"' EXIT
+
+awk -v width="$width" -v height="$height" -v refresh="$refresh" '
+  $0 == "export STEAM_GAMESCOPE_HDR_SUPPORTED=1" {
+    print "export STEAM_GAMESCOPE_HDR_SUPPORTED=0"
+    next
+  }
+  $0 == "export STEAM_GAMESCOPE_VRR_SUPPORTED=1" {
+    print "export STEAM_GAMESCOPE_VRR_SUPPORTED=0"
+    next
+  }
+  $0 == "export STEAM_GAMESCOPE_COLOR_MANAGED=1" {
+    print "export STEAM_GAMESCOPE_COLOR_MANAGED=0"
+    next
+  }
+  $0 == "export STEAM_GAMESCOPE_VIRTUAL_WHITE=1" {
+    print "export STEAM_GAMESCOPE_VIRTUAL_WHITE=0"
+    next
+  }
+  $0 == "\texport STEAM_GAMESCOPE_FORCE_HDR_DEFAULT=1" {
+    print "\texport STEAM_GAMESCOPE_FORCE_HDR_DEFAULT=0"
+    next
+  }
+  $0 == "\texport STEAM_GAMESCOPE_FORCE_OUTPUT_TO_HDR10PQ_DEFAULT=1" {
+    print "\texport STEAM_GAMESCOPE_FORCE_OUTPUT_TO_HDR10PQ_DEFAULT=0"
+    next
+  }
+  /^[[:space:]]*--generate-drm-mode fixed \\/ {
+    printf "\t\t-W %s -H %s -r %s \\\n", width, height, refresh
+  }
+  { print }
+' "$source_script" >"$patched_script"
+
+chmod 0700 "$patched_script"
+exec "$patched_script" "$@"
+EOF
+  chmod 0755 /etc/steamos-nvidia/gamescope-session
+
+  cat >/etc/systemd/user/gamescope-session.service.d/90-steamos-nvidia-display.conf <<'EOF'
+[Service]
+ExecStart=
+ExecStart=/etc/steamos-nvidia/gamescope-session
+EOF
+
+  if id deck >/dev/null 2>&1; then
+    local deck_uid
+    deck_uid=$(id -u deck)
+    if [[ -d /run/user/$deck_uid ]]; then
+      runuser -u deck -- env XDG_RUNTIME_DIR="/run/user/$deck_uid" systemctl --user daemon-reload >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
 post_install() {
   log "Running post-install integration"
   systemd-sysusers /usr/lib/sysusers.d/nvidia-utils.conf >/dev/null 2>&1 || true
@@ -485,6 +562,7 @@ write_atomic_update_keep_list() {
 /etc/systemd/system/multi-user.target.wants/steamos-nvidia-ensure.service
 /etc/systemd/system/sockets.target.wants/sshd.socket
 /etc/systemd/system/steamos-nvidia-ensure.service
+/etc/systemd/user/gamescope-session.service.d/90-steamos-nvidia-display.conf
 EOF
 }
 
@@ -552,6 +630,7 @@ main() {
 
   install_runtime
   write_config
+  install_gamescope_session_override
   install_persistence_hooks
   post_install
   compress_btrfs_paths
