@@ -1,6 +1,6 @@
 # SteamOS-Nvidia-Drivers
 
-Instructions and scripts for installing SteamOS on a PC with an NVIDIA GPU.
+𝖨̶𝗇̶𝗌̶𝗍̶𝗋̶𝗎̶𝖼̶𝗍̶𝗂̶𝗈̶𝗇̶𝗌̶ 𝖺̶𝗇̶𝖽̶ 𝗌̶𝖼̶𝗋̶𝗂̶𝗉̶𝗍̶𝗌̶ Mad hax for installing SteamOS on a PC with an NVIDIA GPU.
 
 ## Current status
 
