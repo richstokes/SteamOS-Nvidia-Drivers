@@ -9,15 +9,21 @@ DKMS_TMP_DIR=${STEAMOS_NVIDIA_DKMS_TMP_DIR:-/var/tmp/steamos-nvidia-dkms}
 OFFLOAD_DIR=${STEAMOS_NVIDIA_OFFLOAD_DIR:-$STATE_DIR/offload}
 PERSISTENT_INSTALL=${STEAMOS_NVIDIA_PERSISTENT_INSTALL:-$STATE_DIR/install}
 FALLBACK_MARKER=${STEAMOS_NVIDIA_FALLBACK_MARKER:-$STATE_DIR/fallback-nouveau-requested}
-DKMS_PACKAGE=${STEAMOS_NVIDIA_DKMS_PACKAGE:-nvidia-open-dkms}
+ARCH_NVIDIA_DIR=${STEAMOS_NVIDIA_ARCH_DIR:-$STATE_DIR/arch-nvidia}
+ARCH_NVIDIA_DB=${STEAMOS_NVIDIA_ARCH_DB:-$ARCH_NVIDIA_DIR/db}
+ARCH_NVIDIA_CACHE=${STEAMOS_NVIDIA_ARCH_CACHE:-$ARCH_NVIDIA_DIR/cache}
+ARCH_NVIDIA_CONFIG=${STEAMOS_NVIDIA_ARCH_CONFIG:-$ARCH_NVIDIA_DIR/pacman.conf}
+DKMS_PACKAGE=nvidia-open-dkms
 REBOOT=${STEAMOS_NVIDIA_REBOOT:-prompt} # prompt, yes, no
 
-RUNTIME_PACKAGES=(
+ARCH_NVIDIA_PACKAGES=(
   nvidia-utils
   lib32-nvidia-utils
   nvidia-settings
   libva-nvidia-driver
   egl-wayland
+  egl-wayland2
+  nvidia-open-dkms
 )
 
 BUILD_PACKAGES=(
@@ -154,10 +160,6 @@ header_package_for_kernel() {
   die "Could not find matching kernel headers for package base '$pkgbase'"
 }
 
-nvidia_utils_version() {
-  pacman -Si nvidia-utils | awk -F': *' '$1 ~ /^Version/ { sub(/-[^-]*$/, "", $2); print $2; exit }'
-}
-
 configure_dkms_workspace() {
   install -d -m 0755 "$STATE_DIR"
   install -d -m 0755 "$DKMS_DIR" "$DKMS_TMP_DIR" /etc/dkms/framework.conf.d
@@ -180,28 +182,71 @@ EOF
 }
 
 install_build_stack() {
-  local kernel pkgbase headers version
+  local kernel pkgbase headers
   kernel=$(uname -r)
   pkgbase=$(kernel_pkgbase "$kernel")
   headers=$(header_package_for_kernel "$pkgbase")
-  version=$(nvidia_utils_version)
 
-  log "Installing DKMS build stack for $kernel using $headers and $DKMS_PACKAGE"
+  log "Installing SteamOS DKMS build stack for $kernel using $headers"
   pacman -Sy --noconfirm
-  pacman -S --noconfirm \
-    --assume-installed "nvidia-utils=$version" \
-    "$headers" dkms "${BUILD_PACKAGES[@]}" "$DKMS_PACKAGE"
+  pacman -S --noconfirm "$headers" dkms "${BUILD_PACKAGES[@]}"
+}
+
+prepare_arch_nvidia_bundle() {
+  local steam_db
+
+  log "Preparing current Arch NVIDIA package bundle in $ARCH_NVIDIA_DIR"
+  steam_db=$(pacman-conf DBPath)
+  [[ -d "$steam_db/local" ]] || die "SteamOS pacman database is missing: $steam_db/local"
+
+  rm -rf "$ARCH_NVIDIA_DIR"
+  install -d -m 0755 "$ARCH_NVIDIA_DB" "$ARCH_NVIDIA_CACHE"
+  cp -a "$steam_db/local" "$ARCH_NVIDIA_DB/"
+
+  cat >"$ARCH_NVIDIA_CONFIG" <<EOF
+[options]
+RootDir = /
+DBPath = $ARCH_NVIDIA_DB
+CacheDir = $ARCH_NVIDIA_CACHE
+GPGDir = /etc/pacman.d/gnupg
+LogFile = $ARCH_NVIDIA_DIR/pacman.log
+Architecture = auto
+SigLevel = Required DatabaseOptional
+
+[core]
+Server = https://geo.mirror.pkgbuild.com/core/os/\$arch
+
+[extra]
+Server = https://geo.mirror.pkgbuild.com/extra/os/\$arch
+
+[multilib]
+Server = https://geo.mirror.pkgbuild.com/multilib/os/\$arch
+EOF
+
+  pacman --config "$ARCH_NVIDIA_CONFIG" -Sy --noconfirm
+  pacman --config "$ARCH_NVIDIA_CONFIG" -Sw --needed --noconfirm "${ARCH_NVIDIA_PACKAGES[@]}"
+}
+
+install_arch_nvidia_bundle() {
+  local packages=()
+
+  mapfile -t packages < <(find "$ARCH_NVIDIA_CACHE" -maxdepth 1 -type f \( -name '*.pkg.tar.zst' -o -name '*.pkg.tar.xz' \) -print | sort)
+  ((${#packages[@]} > 0)) || die "Current Arch NVIDIA bundle was not downloaded"
+
+  log "Installing current Arch NVIDIA package bundle"
+  pacman -U --needed --noconfirm "${packages[@]}"
 }
 
 build_current_module() {
-  local kernel module_version
+  local kernel module_version installed_module_version
   kernel=$(uname -r)
   module_version=$(pacman -Q "$DKMS_PACKAGE" | awk '{ print $2 }' | sed 's/-[0-9][0-9]*$//')
+  installed_module_version=$(modinfo -k "$kernel" -F version nvidia 2>/dev/null || true)
 
   export TMPDIR=$DKMS_TMP_DIR
   install -d -m 1777 "$TMPDIR"
 
-  if modinfo -k "$kernel" nvidia >/dev/null 2>&1; then
+  if [[ "$installed_module_version" == "$module_version" ]]; then
     log "NVIDIA DKMS module $module_version is already installed for $kernel"
     offload_dkms_source "$module_version"
     return 0
@@ -337,11 +382,6 @@ compress_btrfs_root_for_space() {
   done
   sync
   btrfs filesystem sync / >/dev/null 2>&1 || true
-}
-
-install_runtime() {
-  log "Installing NVIDIA runtime packages"
-  pacman -S --needed --noconfirm "${RUNTIME_PACKAGES[@]}"
 }
 
 write_config() {
@@ -667,13 +707,14 @@ main() {
   init_pacman_keyring
   configure_dkms_workspace
   install_build_stack
-  build_current_module
-  remove_build_only_packages
   remove_non_nvidia_gpu_packages
   offload_runtime_space
   compress_btrfs_root_for_space
 
-  install_runtime
+  prepare_arch_nvidia_bundle
+  install_arch_nvidia_bundle
+  build_current_module
+  remove_build_only_packages
   write_config
   install_gamescope_session_override
   install_persistence_hooks

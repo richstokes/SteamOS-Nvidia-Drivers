@@ -16,7 +16,8 @@ Tested from a MacBook against a fresh SteamOS 3.8.14 PC install with:
 
 - Kernel: `6.16.12-valve24.4-1-neptune-616`
 - GPU: GeForce RTX 4090
-- Driver packages from SteamOS repos: `575.64.05`
+- Driver packages: current signed Arch Linux NVIDIA bundle, built against the
+  SteamOS kernel with DKMS
 
 ## End-To-End Install Path
 
@@ -226,7 +227,10 @@ values above, then restart `sddm`.
 - Configures DKMS to keep build state in `/home/.steamos-nvidia/dkms` and
   temporary build files in `/var/tmp/steamos-nvidia-dkms`, avoiding SteamOS's
   tiny `/var` partition without relying on a ramdisk.
-- Builds and installs the NVIDIA DKMS module for the current kernel.
+- Downloads the current signed Arch Linux NVIDIA package bundle into `/home`,
+  then installs those local packages through SteamOS's real pacman database.
+  It does not permanently replace SteamOS's configured package repositories.
+- Builds and installs the NVIDIA DKMS module for the current SteamOS kernel.
 - Moves the NVIDIA DKMS source tree to `/home/.steamos-nvidia/offload/usr-src`
   and links it back into `/usr/src`, so `dkms status` and future rebuilds can
   still find the source while root stays small.
@@ -243,7 +247,8 @@ values above, then restart `sddm`.
   root space for pacman's normal NVIDIA runtime transaction.
 - Compresses the Btrfs root paths that matter for the runtime install so pacman
   has enough space on SteamOS's small root partition.
-- Installs the display/gaming runtime packages, excluding OpenCL by default.
+- Installs matching NVIDIA utilities, 32-bit Steam/Vulkan support, VAAPI, and
+  the current EGL Wayland packages required by Gamescope.
 - Blacklists Nouveau and enables `nvidia_drm` modeset/fbdev.
 - Installs a Gamescope session override that keeps Valve's current SteamOS
   wrapper but patches the launch at runtime for NVIDIA: HDR, VRR, and
