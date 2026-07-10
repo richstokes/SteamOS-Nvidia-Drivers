@@ -372,16 +372,18 @@ source_script=/usr/lib/steamos/gamescope-session
 width=${STEAMOS_NVIDIA_GAMESCOPE_OUTPUT_WIDTH:-1920}
 height=${STEAMOS_NVIDIA_GAMESCOPE_OUTPUT_HEIGHT:-1080}
 refresh=${STEAMOS_NVIDIA_GAMESCOPE_REFRESH:-60}
+force_composition=${STEAMOS_NVIDIA_GAMESCOPE_FORCE_COMPOSITION:-0}
 
 [[ $width =~ ^[0-9]+$ ]] || width=1920
 [[ $height =~ ^[0-9]+$ ]] || height=1080
 [[ $refresh =~ ^[0-9]+([.][0-9]+)?$ ]] || refresh=60
+[[ $force_composition == 0 || $force_composition == 1 ]] || force_composition=0
 
 tmp_parent=${XDG_RUNTIME_DIR:-/tmp}
 patched_script=$(mktemp -p "$tmp_parent" steamos-nvidia-gamescope-session.XXXXXX)
 trap 'rm -f "$patched_script"' EXIT
 
-awk -v width="$width" -v height="$height" -v refresh="$refresh" '
+awk -v width="$width" -v height="$height" -v refresh="$refresh" -v force_composition="$force_composition" '
   $0 == "export STEAM_GAMESCOPE_HDR_SUPPORTED=1" {
     print "export STEAM_GAMESCOPE_HDR_SUPPORTED=0"
     next
@@ -407,6 +409,7 @@ awk -v width="$width" -v height="$height" -v refresh="$refresh" '
     next
   }
   /^[[:space:]]*--generate-drm-mode fixed \\/ {
+    if (force_composition == 1) print "\t\t--force-composition \\"
     printf "\t\t-W %s -H %s -r %s \\\n", width, height, refresh
   }
   { print }

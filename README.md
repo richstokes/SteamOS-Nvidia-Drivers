@@ -199,6 +199,11 @@ EOF
 sudo systemctl restart sddm
 ```
 
+For some NVIDIA systems, `STEAMOS_NVIDIA_GAMESCOPE_FORCE_COMPOSITION=1` can be
+added to the same drop-in to disable Gamescope direct scan-out. This may avoid
+display corruption at the cost of a small amount of latency and GPU work; leave
+it unset unless it demonstrably improves the output.
+
 On the tested RTX 4090 + ASUS PG32UQ setup:
 
 - `1920x1080@60` is the stable fallback.
