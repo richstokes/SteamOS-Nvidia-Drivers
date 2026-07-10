@@ -166,6 +166,51 @@ The NVIDIA PCI device should show `Kernel driver in use: nvidia`, and
 - OpenCL is intentionally not installed by default because it is not needed for
   Steam gaming and makes the root partition much tighter.
 
+## Gamescope Display Mode
+
+SteamOS Game Mode runs through Gamescope, and NVIDIA support there is still
+rough. The installer therefore defaults to a conservative output mode:
+
+```text
+1920x1080@60
+HDR off
+VRR off
+Gamescope color-management advertising off
+```
+
+You can override the physical output mode with a systemd user drop-in:
+
+```bash
+sudo mkdir -p /etc/systemd/user/gamescope-session.service.d
+
+sudo tee /etc/systemd/user/gamescope-session.service.d/90-steamos-nvidia-display.conf >/dev/null <<'EOF'
+[Service]
+ExecStart=
+ExecStart=/etc/steamos-nvidia/gamescope-session
+Environment=STEAMOS_NVIDIA_GAMESCOPE_OUTPUT_WIDTH=2560
+Environment=STEAMOS_NVIDIA_GAMESCOPE_OUTPUT_HEIGHT=1440
+Environment=STEAMOS_NVIDIA_GAMESCOPE_REFRESH=144
+Environment=STEAM_GAMESCOPE_HDR_SUPPORTED=0
+Environment=STEAM_GAMESCOPE_VRR_SUPPORTED=0
+Environment=STEAM_GAMESCOPE_COLOR_MANAGED=0
+Environment=STEAM_GAMESCOPE_VIRTUAL_WHITE=0
+EOF
+
+sudo systemctl restart sddm
+```
+
+On the tested RTX 4090 + ASUS PG32UQ setup:
+
+- `1920x1080@60` is the stable fallback.
+- `2560x1440@144` works well and is the best tested compromise.
+- `3840x2160@155` is selectable, but flickers on SteamOS/Gamescope/NVIDIA
+  `575.64.05`.
+- `3840x2160@120` was not advertised by this monitor's Linux DRM mode list,
+  even though Windows may expose different/custom timings.
+
+If a mode gives you a black screen, SSH back in and restore the conservative
+values above, then restart `sddm`.
+
 ## What the installer does
 
 - Disables SteamOS root read-only mode when needed.
