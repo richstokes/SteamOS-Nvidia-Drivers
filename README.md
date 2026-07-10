@@ -154,27 +154,17 @@ The NVIDIA PCI device should show `Kernel driver in use: nvidia`, and
 
 ## Installer Notes
 
-The installer uses normal pacman installs for the NVIDIA runtime. DKMS build
-state and temporary build files are moved off SteamOS's tiny `/var` partition,
-which is the part that caused the initial NVIDIA module build to fail.
-The DKMS source tree is also moved to `/home/.steamos-nvidia/offload/usr-src`
-and linked back into `/usr/src`, keeping DKMS usable without leaving the source
-payload on root.
-The installer itself is copied to `/home/.steamos-nvidia/install` so it
-survives SteamOS A/B root image swaps.
-Build-only packages are removed after the module is built so the NVIDIA runtime
-fits on SteamOS's 5 GiB root partition. The boot ensure service reinstalls
-them before future rebuilds.
-On NVIDIA-only systems, the installer also removes Intel/AMD/Mesa GPU runtime
-packages that are not useful for this target and compresses the Btrfs root
-before installing the NVIDIA runtime.
-Because the normal NVIDIA runtime packages are larger than SteamOS's default
-root partition can comfortably transact, the installer offloads
-`/usr/share/fonts`, `/usr/share/locale`, and `/usr/share/wallpapers` to
-`/home/.steamos-nvidia/offload` with bind mounts. Those files remain available,
-but their storage lives on the large home partition.
-OpenCL packages are not installed by default because they are not needed for
-Steam gaming and make the root partition fit much tighter.
+- SteamOS's root partition is small, so the installer moves DKMS state, DKMS
+  source, and bulky runtime assets under `/home/.steamos-nvidia` where possible.
+- Build-only packages are installed only long enough to compile the NVIDIA DKMS
+  module, then removed again before the NVIDIA runtime is installed.
+- The installer copies itself to `/home/.steamos-nvidia/install` and installs a
+  boot-time repair service so SteamOS A/B root updates can be repaired on first
+  boot.
+- The Gamescope override defaults to a conservative NVIDIA-friendly display
+  path: 1920x1080@60, HDR off, VRR off.
+- OpenCL is intentionally not installed by default because it is not needed for
+  Steam gaming and makes the root partition much tighter.
 
 ## What the installer does
 
