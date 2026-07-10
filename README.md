@@ -5,7 +5,7 @@
 ## Current status
 
 This is extremely experimental. I mostly did this to see if I could. And I can!
-"It works on my machine", but there are absolutely no guarantees.
+"It works on my machine", but there are absolutely no guarantees it will work for you.
 
 SteamOS does not officially support NVIDIA desktop GPUs. Expect rough edges,
 especially around Gamescope, display modes, HDR, VRR, and SteamOS updates.
