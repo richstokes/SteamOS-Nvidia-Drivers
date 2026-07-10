@@ -10,13 +10,13 @@ This is extremely experimental. I mostly did this to see if I could. And I can!
 SteamOS does not officially support NVIDIA desktop GPUs. Expect rough edges,
 especially around Gamescope, display modes, HDR, VRR, and SteamOS updates.
 
+You need another machine that can run scripts from and SSH into the SteamOS PC.
+
 Tested from a MacBook against a fresh SteamOS 3.8.14 PC install with:
 
 - Kernel: `6.16.12-valve24.4-1-neptune-616`
 - GPU: GeForce RTX 4090
 - Driver packages from SteamOS repos: `575.64.05`
-
-You need another machine that can run scripts and SSH into the SteamOS PC.
 
 ## End-To-End Install Path
 
@@ -24,7 +24,7 @@ You need another machine that can run scripts and SSH into the SteamOS PC.
 
 Download the latest Steam Deck recovery/OOBE repair image from:
 
-https://steamdeck-images.steamos.cloud/recovery/
+[Steam Deck recovery images](https://steamdeck-images.steamos.cloud/recovery/)
 
 For example:
 
