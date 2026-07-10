@@ -4,13 +4,18 @@
 
 ## Current status
 
-This is extremely experimental. I mostly did this to see if I could. And I can!
+This is extremely experimental. I mostly did this to see if I could.. turns out I can!  
+
 "It works on my machine", but there are absolutely no guarantees it will work for you.
 
 SteamOS does not officially support NVIDIA desktop GPUs. Expect rough edges,
 especially around Gamescope, display modes, HDR, VRR, and SteamOS updates.
 
-You need another machine that can run scripts from and SSH into the SteamOS PC.
+Disclaimers out the way, I will say that once setup, SteamOS works great with my Nvidia GPU. Everything seems stable and games perform well.
+
+## How to
+
+This method relies on you having another machine which you will use to SSH into SteamOS in order to install the drivers etc. Using SSH to remotely set up SteamOS was really helpful here, since when I tried a plain SteamOS install, it would boot into a black screen and was unresponsive to keyboard input. However being able to remotely connect in via SSH, we can run the scripts from this repo to successfully install the Nvidia drivers.
 
 Tested from a MacBook against a fresh SteamOS 3.8.14 PC install with:
 
@@ -35,29 +40,25 @@ steamdeck-oobe-repair-20260707.10-3.8.14.img.bz2
 
 ### 2. Flash And Install SteamOS
 
-Flash the image to a USB stick and boot the target PC from it.
+[Flash the image to a USB stick and install SteamOS from it](https://help.steampowered.com/en/faqs/view/65B4-2AA3-5F37-4227).
 
-This will wipe the target PC. I recommend physically disconnecting or removing
+> This will wipe the target PC. I recommend physically disconnecting or removing
 any drives that contain data you care about before installing.
 
 After install, one of two things usually happens:
 
-- You get a working desktop and can [enable SSH normally](https://www.reddit.com/r/SteamDeck/comments/tz490v/enable_ssh_on_the_deck/).
-- You get a black screen or an unresponsive keyboard before you can enable SSH.
+- You get a working desktop and should [enable SSH normally](https://www.reddit.com/r/SteamDeck/comments/tz490v/enable_ssh_on_the_deck/).
+- You get a black screen or an unresponsive keyboard and cannot use the desktop environment.
 
-If you get a working desktop, enable SSH from SteamOS. One common route is:
-
-```bash
-sudo systemctl enable --now sshd
-```
-
-If you cannot reach a working desktop, create an SSH-enabled SteamOS image
-before flashing.
+If you cannot reach a working desktop, create an SSH-enabled-by-default SteamOS image
+before flashing - see step 3 below!
 
 ### 3. Optional: Create An SSH-Enabled Image
 
+> You only need to do this step if you were not able to get SSH enabled by following the regular SteamOS install process above.
+
 `patch-steamos-ssh-admin.sh` patches a SteamOS image so it boots with SSH
-enabled and a sudo-capable admin user.
+enabled and creates a sudo-capable admin user.
 
 Default credentials:
 
@@ -66,7 +67,7 @@ username: steamosadmin
 password: steamtest123
 ```
 
-The patch script requires Docker on the machine doing the patching.
+The patch script requires Docker on the machine doing the patching, as it uses a bunch of Linux/filesystem tools and this was the easiest approach.
 
 First decompress the image:
 
@@ -87,7 +88,7 @@ chmod +x patch-steamos-ssh-admin.sh
 Use `--user` and `--password` if you want different temporary credentials.
 
 Flash the `*-ssh.img` file to USB and install SteamOS from that USB stick.
-After first boot, SSH should be available:
+After first boot, SSH should be available and you can confirm with:
 
 ```bash
 ssh steamosadmin@<steam-pc-ip>
@@ -95,13 +96,12 @@ ssh steamosadmin@<steam-pc-ip>
 
 ### 4. Install The NVIDIA Driver Remotely
 
-Once SSH is enabled, copy `install-steamos-nvidia.sh` to the SteamOS PC and run
-it there with sudo.
+Once SSH is enabled and confirmed working.
 
 Set these values for your machine:
 
 ```bash
-STEAMOS_HOST=192.168.1.75
+STEAMOS_HOST=192.168.1.75 # Replace with the IP of your Steam PC
 STEAMOS_USER=steamosadmin
 ```
 
@@ -114,7 +114,7 @@ ssh "$STEAMOS_USER@$STEAMOS_HOST" \
   'chmod +x /tmp/install-steamos-nvidia.sh && sudo STEAMOS_NVIDIA_REBOOT=yes /tmp/install-steamos-nvidia.sh'
 ```
 
-If you enabled SSH for the normal `deck` user instead, set
+> If you enabled SSH for the normal `deck` user instead, set
 `STEAMOS_USER=deck`.
 
 The installer may take a while. It installs temporary build dependencies,
@@ -205,16 +205,20 @@ added to the same drop-in to disable Gamescope direct scan-out. This may avoid
 display corruption at the cost of a small amount of latency and GPU work; leave
 it unset unless it demonstrably improves the output.
 
+For stable high-refresh 4K on NVIDIA, use SteamOS Desktop Mode instead: set
+the output mode in KDE Display Configuration, then launch Steam Big Picture.
+That path uses KDE's Wayland compositor rather than Gamescope's DRM scan-out.
+On the tested system, `3840x2160@144` is stable in Desktop Mode even though it
+flickers in SteamOS Game Mode.
+
 On the tested RTX 4090 + ASUS PG32UQ setup:
 
 - `1920x1080@60` is the stable fallback.
 - `2560x1440@144` works well and is the best tested compromise.
 - `3840x2160@155` is selectable with the monitor overclock enabled, but
-  flickers on SteamOS/Gamescope/NVIDIA `575.64.05`.
+  flickers in SteamOS Game Mode.
 - With the monitor overclock disabled, native `3840x2160@144` and
-  `3840x2160@120` are advertised by Linux DRM. Both flickered with direct
-  scan-out; try `STEAMOS_NVIDIA_GAMESCOPE_FORCE_COMPOSITION=1` before
-  concluding that a high-refresh 4K path is unusable.
+  `3840x2160@120` are advertised by Linux DRM. Both flickered in Gamescope (SteamOS Game Mode), but were fine in Desktop/KDE mode.
 
 If a mode gives you a black screen, SSH back in and restore the conservative
 values above, then restart `sddm`.
@@ -269,20 +273,6 @@ values above, then restart `sddm`.
   DKMS configuration, Gamescope override, and bind-mount configuration across
   A/B root updates.
 - Rebuilds initramfs and enables `nvidia-persistenced`.
-
-## Manual Verification
-
-After reboot:
-
-```bash
-lspci -nnk | sed -n '/VGA\|3D\|Display/,+5p'
-lsmod | grep -E '^(nvidia|nvidia_drm|nvidia_modeset|nvidia_uvm|nouveau)'
-nvidia-smi
-```
-
-The PCI device should show `Kernel driver in use: nvidia`, and `nvidia-smi`
-should list the GPU. If Nouveau is still loaded, reboot once more and check
-that `/etc/modprobe.d/steamos-nvidia.conf` exists.
 
 ## Persistence And Recovery
 
