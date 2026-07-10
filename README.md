@@ -41,7 +41,7 @@ any drives that contain data you care about before installing.
 
 After install, one of two things usually happens:
 
-- You get a working desktop and can enable SSH normally.
+- You get a working desktop and can [enable SSH normally](https://www.reddit.com/r/SteamDeck/comments/tz490v/enable_ssh_on_the_deck/).
 - You get a black screen or an unresponsive keyboard before you can enable SSH.
 
 If you get a working desktop, enable SSH from SteamOS. One common route is:
