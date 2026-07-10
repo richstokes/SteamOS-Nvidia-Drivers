@@ -94,6 +94,31 @@ After first boot, SSH should be available and you can confirm with:
 ssh steamosadmin@<steam-pc-ip>
 ```
 
+#### Optional: set up passwordless SSH login
+
+After confirming that password-based SSH works, copy the public key from the
+machine you will use to administer SteamOS. This lets subsequent `ssh` and
+`scp` commands log in without repeatedly prompting for the SteamOS password:
+
+```bash
+ssh-copy-id steamosadmin@<steam-pc-ip>
+```
+
+If `ssh-copy-id` is unavailable, use this equivalent command instead:
+
+```bash
+cat ~/.ssh/id_ed25519.pub | ssh steamosadmin@<steam-pc-ip> \
+  'umask 077; mkdir -p ~/.ssh; cat >> ~/.ssh/authorized_keys'
+```
+
+Replace `id_ed25519.pub` with the public-key filename you use, and substitute
+`deck` for `steamosadmin` if that is the account you enabled SSH for. Verify it
+before continuing:
+
+```bash
+ssh steamosadmin@<steam-pc-ip>
+```
+
 ### 4. Install The NVIDIA Driver Remotely
 
 Once SSH is enabled and confirmed working.
