@@ -73,6 +73,22 @@ their health, SteamOS boot configuration, update-channel metadata, important
 mounts/partitions, and boot-loader data. It never marks a slot good/bad or
 changes boot configuration.
 
+## Enable GameMode's CPU governor helper
+
+```bash
+./enable-steamos-gamemode-governor.sh
+```
+
+SteamOS includes GameMode but its default Polkit policy denies its privileged
+CPU-governor helper. This optional helper grants the `deck` session access to
+that one GameMode action, so games launched with `gamemoderun %command%` can
+temporarily use the performance governor. It does not grant general `pkexec`
+or administrator access, and it leaves GameMode's other privileged helpers
+denied.
+
+It writes its own atomic-update keep-list so SteamOS A/B updates retain the
+authorization. Use `--remove` to undo it, then fully relaunch any running game.
+
 ## Sudo and SSH
 
 Backup and restore need SteamOS sudo access to reliably read and write a home
