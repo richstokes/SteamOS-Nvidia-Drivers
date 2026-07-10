@@ -208,10 +208,12 @@ On the tested RTX 4090 + ASUS PG32UQ setup:
 
 - `1920x1080@60` is the stable fallback.
 - `2560x1440@144` works well and is the best tested compromise.
-- `3840x2160@155` is selectable, but flickers on SteamOS/Gamescope/NVIDIA
-  `575.64.05`.
-- `3840x2160@120` was not advertised by this monitor's Linux DRM mode list,
-  even though Windows may expose different/custom timings.
+- `3840x2160@155` is selectable with the monitor overclock enabled, but
+  flickers on SteamOS/Gamescope/NVIDIA `575.64.05`.
+- With the monitor overclock disabled, native `3840x2160@144` and
+  `3840x2160@120` are advertised by Linux DRM. Both flickered with direct
+  scan-out; try `STEAMOS_NVIDIA_GAMESCOPE_FORCE_COMPOSITION=1` before
+  concluding that a high-refresh 4K path is unusable.
 
 If a mode gives you a black screen, SSH back in and restore the conservative
 values above, then restart `sddm`.

@@ -287,16 +287,22 @@ offload_root_directory() {
   install -d -m 0755 "$OFFLOAD_DIR" "$target_dir"
 
   if is_exact_mountpoint "$source_dir"; then
-    log "$source_dir is already mounted"
-  else
-    install -d -m 0755 "$source_dir"
-    if [[ -n "$(find "$source_dir" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
-      log "Offloading $source_dir to $target_dir"
-      cp -a "$source_dir"/. "$target_dir"/
-      find "$source_dir" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+    # An atomic update may already have mounted the persistent tree over a
+    # freshly populated directory in the new root slot. Temporarily reveal
+    # that lower directory so its duplicate files do not consume root space.
+    if ! umount "$source_dir"; then
+      log "$source_dir is mounted and busy; retaining the existing offload"
+      return 0
     fi
-    mount --bind "$target_dir" "$source_dir"
   fi
+
+  install -d -m 0755 "$source_dir"
+  if [[ -n "$(find "$source_dir" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+    log "Offloading $source_dir to $target_dir"
+    cp -a "$source_dir"/. "$target_dir"/
+    find "$source_dir" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+  fi
+  mount --bind "$target_dir" "$source_dir"
 
   if ! grep -Fqs "$fstab_line" /etc/fstab; then
     touch /etc/fstab
