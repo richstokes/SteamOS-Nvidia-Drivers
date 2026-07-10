@@ -86,8 +86,27 @@ temporarily use the performance governor. It does not grant general `pkexec`
 or administrator access, and it leaves GameMode's other privileged helpers
 denied.
 
+On the test NVIDIA SteamOS PC, enabling this policy and launching the game
+through GameMode resolved intermittent frame-time stutter that occurred while
+the CPU remained on its balanced policy. That is an observed result rather
+than a general guarantee; use it as a focused troubleshooting step for similar
+low-GPU-utilization stutter.
+
 It writes its own atomic-update keep-list so SteamOS A/B updates retain the
 authorization. Use `--remove` to undo it, then fully relaunch any running game.
+
+To add `gamemoderun` before the existing launch options for every installed
+Steam game, run:
+
+```bash
+./enable-steamos-gamemode-governor.sh --set-launch-options
+```
+
+The helper asks for confirmation, refuses to edit while Steam or a Steam game
+is running, and writes a timestamped `localconfig.vdf` backup beside every
+configuration it changes. Existing launch options are retained after
+`gamemoderun`; games that already use it are left alone. For unattended use,
+add `--yes`.
 
 ## Sudo and SSH
 
