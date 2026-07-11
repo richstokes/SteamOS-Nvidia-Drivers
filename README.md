@@ -151,9 +151,25 @@ ssh "$STEAMOS_USER@$STEAMOS_HOST" \
 `STEAMOS_USER=deck`.
 
 The installer may take a while. It installs temporary build dependencies,
-builds the NVIDIA DKMS module for the running SteamOS kernel, removes the build
-dependencies again, installs the NVIDIA runtime, writes persistence hooks, and
-then reboots if `STEAMOS_NVIDIA_REBOOT=yes` is set.
+installs the NVIDIA package bundle, builds the DKMS module for the running
+SteamOS kernel, removes the build dependencies again, writes persistence hooks,
+and then reboots if `STEAMOS_NVIDIA_REBOOT=yes` is set.
+
+#### Driver installation model
+
+The installer uses two deliberately different sources:
+
+- NVIDIA user-space packages come from Arch Linux's current signed repositories.
+  They are downloaded using a temporary package database under
+  `/home/.steamos-nvidia/arch-nvidia`, then installed through SteamOS's own
+  `pacman`. SteamOS's configured repositories are not replaced.
+- The kernel module is Arch's `nvidia-open-dkms` package. DKMS builds NVIDIA's
+  open kernel module locally against the exact SteamOS kernel that is currently
+  booted. This is neither Arch's prebuilt `nvidia-open` module package nor the
+  NVIDIA `.run` installer.
+
+For a SteamOS kernel update, the boot-time ensure service reruns the persistent
+installer and DKMS rebuilds the module for the kernel in the new root slot.
 
 If you prefer to reboot manually, use:
 
@@ -167,9 +183,6 @@ Then reboot the SteamOS PC yourself.
 Useful environment overrides:
 
 ```bash
-# Use the proprietary DKMS kernel module package instead of NVIDIA's open module package.
-STEAMOS_NVIDIA_DKMS_PACKAGE=nvidia-dkms sudo ./install-steamos-nvidia.sh
-
 # Reboot automatically after installation.
 STEAMOS_NVIDIA_REBOOT=yes sudo ./install-steamos-nvidia.sh
 ```
@@ -191,7 +204,7 @@ The NVIDIA PCI device should show `Kernel driver in use: nvidia`, and
 - SteamOS's root partition is small, so the installer moves DKMS state, DKMS
   source, and bulky runtime assets under `/home/.steamos-nvidia` where possible.
 - Build-only packages are installed only long enough to compile the NVIDIA DKMS
-  module, then removed again before the NVIDIA runtime is installed.
+  module, then removed again after the module build completes.
 - The installer copies itself to `/home/.steamos-nvidia/install` and installs a
   boot-time repair service so SteamOS A/B root updates can be repaired on first
   boot.
@@ -273,9 +286,8 @@ values above, then restart `sddm`.
   still find the source while root stays small.
 - Copies the installer to `/home/.steamos-nvidia/install`, which is the copy
   used by the boot repair service after SteamOS updates.
-- Removes build-only packages before installing the NVIDIA runtime. This leaves
-  DKMS installed without its build dependencies until the next rebuild is
-  needed, keeping root space available for the runtime.
+- Removes build-only packages after the NVIDIA module build. This leaves DKMS
+  installed without its build dependencies until the next rebuild is needed.
 - On systems where all display-class PCI devices are NVIDIA, removes
   non-NVIDIA GPU runtime packages such as `vulkan-intel` and `vulkan-radeon`
   before installing the NVIDIA runtime.

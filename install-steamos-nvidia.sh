@@ -293,7 +293,7 @@ remove_build_only_packages() {
   pkgbase=$(kernel_pkgbase "$kernel")
   headers=$(header_package_for_kernel "$pkgbase")
 
-  log "Removing build-only packages before installing NVIDIA runtime"
+  log "Removing temporary DKMS build packages"
   pacman -Rdd --noconfirm "$headers" "${BUILD_PACKAGES[@]}" libisl libmpc || true
   sync
   btrfs filesystem sync / >/dev/null 2>&1 || true
