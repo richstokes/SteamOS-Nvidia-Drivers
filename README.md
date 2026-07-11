@@ -258,7 +258,11 @@ On the tested RTX 4090 + ASUS PG32UQ setup:
   `3840x2160@120` are advertised by Linux DRM. Both flickered in Gamescope (SteamOS Game Mode), but were fine in Desktop/KDE mode.
 
 If a mode gives you a black screen, SSH back in and restore the conservative
-values above, then restart `sddm`.
+values above, then restart the display manager:
+
+```bash
+sudo systemctl restart sddm
+```
 
 ## What the installer does
 
