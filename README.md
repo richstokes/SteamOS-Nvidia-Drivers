@@ -100,7 +100,7 @@ After first boot, SSH should be available and you can confirm with:
 ssh steamosadmin@<steam-pc-ip>
 ```
 
-### 4. Optional: set up passwordless SSH login
+### 4. Optional: Set up passwordless SSH login
 
 After confirming that password-based SSH works, copy the public key from the
 machine you will use to administer SteamOS. This lets subsequent `ssh` and
