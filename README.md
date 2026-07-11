@@ -199,20 +199,6 @@ ssh "$STEAMOS_USER@$STEAMOS_HOST" \
 The NVIDIA PCI device should show `Kernel driver in use: nvidia`, and
 `nvidia-smi` should list the GPU.
 
-## Installer Notes
-
-- SteamOS's root partition is small, so the installer moves DKMS state, DKMS
-  source, and bulky runtime assets under `/home/.steamos-nvidia` where possible.
-- Build-only packages are installed only long enough to compile the NVIDIA DKMS
-  module, then removed again after the module build completes.
-- The installer copies itself to `/home/.steamos-nvidia/install` and installs a
-  boot-time repair service so SteamOS A/B root updates can be repaired on first
-  boot.
-- The Gamescope override defaults to a conservative NVIDIA-friendly display
-  path: 1920x1080@60, HDR off, VRR off.
-- OpenCL is intentionally not installed by default because it is not needed for
-  Steam gaming and makes the root partition much tighter.
-
 ## Gamescope Display Mode
 
 SteamOS Game Mode runs through Gamescope, and NVIDIA support there is still
@@ -271,53 +257,22 @@ values above, then restart `sddm`.
 
 ## What the installer does
 
-- Disables SteamOS root read-only mode when needed.
-- Initializes the `pacman` keyring with `archlinux` and `holo` keys.
-- Detects the running Neptune kernel and installs matching headers.
-- Configures DKMS to keep build state in `/home/.steamos-nvidia/dkms` and
-  temporary build files in `/var/tmp/steamos-nvidia-dkms`, avoiding SteamOS's
-  tiny `/var` partition without relying on a ramdisk.
-- Downloads the current signed Arch Linux NVIDIA package bundle into `/home`,
-  then installs those local packages through SteamOS's real pacman database.
-  It does not permanently replace SteamOS's configured package repositories.
-- Builds and installs the NVIDIA DKMS module for the current SteamOS kernel.
-- Moves the NVIDIA DKMS source tree to `/home/.steamos-nvidia/offload/usr-src`
-  and links it back into `/usr/src`, so `dkms status` and future rebuilds can
-  still find the source while root stays small.
-- Copies the installer to `/home/.steamos-nvidia/install`, which is the copy
-  used by the boot repair service after SteamOS updates.
-- Removes build-only packages after the NVIDIA module build. This leaves DKMS
-  installed without its build dependencies until the next rebuild is needed.
-- On systems where all display-class PCI devices are NVIDIA, removes
-  non-NVIDIA GPU runtime packages such as `vulkan-intel` and `vulkan-radeon`
-  before installing the NVIDIA runtime.
-- Offloads bulky `/usr/share` assets and Steam's user-space runtime to
-  `/home/.steamos-nvidia/offload` with persistent bind mounts, freeing enough
-  root space for pacman's normal NVIDIA runtime transaction.
-- Compresses the Btrfs root paths that matter for the runtime install so pacman
-  has enough space on SteamOS's small root partition.
-- Installs matching NVIDIA utilities, 32-bit Steam/Vulkan support, VAAPI, and
-  the current EGL Wayland packages required by Gamescope.
-- Blacklists Nouveau and enables `nvidia_drm` modeset/fbdev.
-- Installs a Gamescope session override that keeps Valve's current SteamOS
-  wrapper but patches the launch at runtime for NVIDIA: HDR, VRR, and
-  Gamescope color-management advertising are disabled, and the physical output
-  is constrained to 1920x1080@60 by default. Override with
-  `STEAMOS_NVIDIA_GAMESCOPE_OUTPUT_WIDTH`,
-  `STEAMOS_NVIDIA_GAMESCOPE_OUTPUT_HEIGHT`, and
-  `STEAMOS_NVIDIA_GAMESCOPE_REFRESH` if your display path is stable at a higher
-  mode.
-- Installs `/etc/steamos-nvidia/install` and an `/etc` systemd ensure service.
-  If a SteamOS update boots a root slot without the NVIDIA module/runtime, the
-  service reruns this installer before the display manager starts, then performs
-  one activation reboot so the new module binds. If it remains inactive after
-  that reboot, it enables SSH and removes the NVIDIA-only boot config so the
-  machine can fall back to Nouveau instead of black-screening.
-- Writes `/etc/atomic-update.conf.d/90-steamos-nvidia.conf` so SteamOS's
-  atomic updater keeps the NVIDIA config, repair service, SSH enablement,
-  DKMS configuration, Gamescope override, and bind-mount configuration across
-  A/B root updates.
-- Rebuilds initramfs and enables `nvidia-persistenced`.
+- Installs the current signed Arch NVIDIA user-space bundle and builds the
+  `nvidia-open-dkms` kernel module for the running SteamOS kernel.
+- Keeps DKMS state and large runtime assets under `/home/.steamos-nvidia`, and
+  removes temporary compiler/header packages after the module build, to fit
+  SteamOS's small root partition.
+- On NVIDIA-only systems, removes unneeded Intel/AMD graphics runtime packages
+  before installing the NVIDIA stack.
+- Disables Nouveau, enables `nvidia_drm` modesetting/fbdev, rebuilds initramfs,
+  and enables `nvidia-persistenced`.
+- Installs an NVIDIA-oriented Gamescope override with a conservative
+  `1920x1080@60` output and HDR, VRR, and color-management advertising off.
+- Preserves its configuration through atomic A/B updates and installs a
+  boot-time repair service that rebuilds/reinstalls the NVIDIA stack when a new
+  root slot lacks it.
+- Enables SSH during repair and falls back to Nouveau after a failed rebuild,
+  avoiding a permanently unreachable black-screen system.
 
 ## Persistence And Recovery
 
