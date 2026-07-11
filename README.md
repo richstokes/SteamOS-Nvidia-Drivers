@@ -11,7 +11,7 @@ This is extremely experimental. I mostly did this to see if I could.. turns out 
 SteamOS does not officially support NVIDIA desktop GPUs. Expect rough edges,
 especially around Gamescope, display modes, HDR, VRR, and SteamOS updates.
 
-Disclaimers out the way, I will say that once setup, SteamOS works great with my Nvidia GPU. Everything seems stable and games perform well.
+Disclaimers out the way, I will say that once setup, SteamOS works great with my Nvidia GPU! Everything seems stable and games perform well.
 
 ## How to
 
