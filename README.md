@@ -97,7 +97,7 @@ chmod +x patch-steamos-ssh-admin.sh
 
 Use `--user` and `--password` if you want different temporary credentials.
 
-Flash the `*-ssh.img` file to USB and install SteamOS from that USB stick.
+Flash the newly-generated `*-ssh.img` file to USB and install SteamOS from that USB stick.
 After first boot, SSH should be available and you can confirm with:
 
 ```bash
