@@ -56,7 +56,7 @@ After install, one of two things usually happens:
 - You get a working desktop and should [enable SSH normally](https://www.reddit.com/r/SteamDeck/comments/tz490v/enable_ssh_on_the_deck/).
 - You get a black screen or an unresponsive keyboard and cannot use the desktop environment.
 
-If you cannot reach a working desktop, create an SSH-enabled-by-default SteamOS image
+If you cannot reach a working desktop and enable SSH, create an "SSH-enabled-by-default" SteamOS image
 before flashing - see step 3 below!
 
 ### 3. Optional: Create An SSH-Enabled Image
@@ -100,7 +100,7 @@ After first boot, SSH should be available and you can confirm with:
 ssh steamosadmin@<steam-pc-ip>
 ```
 
-#### Optional: set up passwordless SSH login
+### 4. Optional: set up passwordless SSH login
 
 After confirming that password-based SSH works, copy the public key from the
 machine you will use to administer SteamOS. This lets subsequent `ssh` and
@@ -125,7 +125,7 @@ before continuing:
 ssh steamosadmin@<steam-pc-ip>
 ```
 
-### 4. Install The NVIDIA Driver Remotely
+### 5. Install The NVIDIA Driver Remotely
 
 Once SSH is enabled and confirmed working.
 
@@ -172,7 +172,7 @@ STEAMOS_NVIDIA_DKMS_PACKAGE=nvidia-dkms sudo ./install-steamos-nvidia.sh
 STEAMOS_NVIDIA_REBOOT=yes sudo ./install-steamos-nvidia.sh
 ```
 
-### 5. Verify
+### 6. Verify
 
 After the SteamOS PC reboots, SSH back in and check:
 
@@ -347,3 +347,7 @@ sudo rm -f /etc/environment.d/90-nvidia.conf
 sudo mkinitcpio -P
 sudo reboot
 ```
+
+## Extras
+
+The [misc directory](https://github.com/richstokes/SteamOS-Nvidia-Drivers/tree/main/misc) in this repo contains a collection of scripts for working with SteamOS, such as automating back ups and some performance tweaks.
