@@ -15,7 +15,7 @@ Disclaimers out the way, I will say that once setup, SteamOS works great with my
 
 ## How to
 
-This method relies on you having another machine which you will use to SSH into SteamOS in order to install the drivers etc. Using SSH to remotely set up SteamOS was really helpful here, since when I tried a plain SteamOS install, it would boot into a black screen and was unresponsive to keyboard input. However being able to remotely connect in via SSH, we can run the scripts from this repo to successfully install the Nvidia drivers.
+This method relies on you having another machine which you will use to SSH into SteamOS in order to install the drivers etc. Using SSH to remotely set up SteamOS was really helpful here, since when I tried a plain SteamOS install, it would boot into a black screen and was unresponsive to keyboard input. However being able to remotely connect in via SSH, we can run the scripts from this repo to successfully install the Nvidia drivers. SSH also provides a remote way in to debug/fix the system if a bad update breaks something.
 
 A requirement is that the Steam PC is connected to your network via Ethernet.
 
