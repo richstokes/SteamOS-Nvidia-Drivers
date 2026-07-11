@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Stream a SteamOS home-directory ZIP over SSH to this machine.
+# Stream a faithful SteamOS home-directory tar.zst archive over SSH.
 set -Eeuo pipefail
 
 usage() {
   cat <<'EOF'
 Usage: backup-steamos-home.sh --host HOST [options]
 
-Create a dated ZIP backup of a SteamOS user's home. SteamOS creates the ZIP and
-streams it directly to this machine; no large temporary archive is left there.
+Create a dated .tar.zst backup of a SteamOS home directory. The archive is
+created on SteamOS and streamed directly to this machine; no large temporary
+archive is left there. It preserves numeric ownership, modes, ACLs, extended
+attributes, hard links, symlinks, and sparse files.
 
 Options:
   -H, --host HOST          SteamOS hostname or IP (or STEAMOS_HOST).
@@ -50,11 +52,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$HOST" ]] || { usage >&2; exit 2; }
-[[ "$REMOTE_HOME" =~ ^/home/[^/]+$ ]] ||
-  die "--remote-home must be a direct home directory such as /home/deck"
+[[ "$REMOTE_HOME" =~ ^/home/[^/]+$ ]] || die "--remote-home must be a direct home directory such as /home/deck"
 [[ "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || die "invalid SSH user: $SSH_USER"
 require_cmd ssh
-require_cmd unzip
+require_cmd tar
+require_cmd zstd
 require_cmd df
 
 mkdir -p "$OUTPUT_DIR"
@@ -66,10 +68,7 @@ remote() { "${SSH[@]}" "$1"; }
 SUDO_MODE=
 SUDO_PASSWORD=
 init_remote_sudo() {
-  if remote 'sudo -n true' >/dev/null 2>&1; then
-    SUDO_MODE=noninteractive
-    return
-  fi
+  if remote 'sudo -n true' >/dev/null 2>&1; then SUDO_MODE=noninteractive; return; fi
   [[ -t 0 ]] || die "SteamOS sudo needs a password, but this script has no interactive terminal"
   printf 'SteamOS sudo password for %s: ' "$TARGET" >&2
   IFS= read -r -s SUDO_PASSWORD
@@ -92,7 +91,8 @@ cleanup() {
 trap cleanup EXIT
 
 init_remote_sudo
-remote 'command -v zip >/dev/null' || die "SteamOS is missing zip (install the 'zip' package first)"
+remote 'command -v tar >/dev/null && command -v zstd >/dev/null' ||
+  die "SteamOS needs GNU tar and zstd"
 
 if [[ "$INCLUDE_DOT_STEAM_BACKUPS" == true ]]; then
   printf -v du_script 'test -d %q && du -sk -- %q | awk '\''NR == 1 { print $1 }'\''' "$REMOTE_HOME" "$REMOTE_HOME"
@@ -102,9 +102,12 @@ fi
 SOURCE_KIB=$(remote_sudo "$du_script")
 [[ "$SOURCE_KIB" =~ ^[0-9]+$ ]] || die "could not determine disk usage for $REMOTE_HOME"
 
+printf -v id_script 'stat -c '\''%%u %%g'\'' %q' "$REMOTE_HOME"
+read -r HOME_UID HOME_GID <<<"$(remote_sudo "$id_script")"
+[[ "$HOME_UID" =~ ^[0-9]+$ && "$HOME_GID" =~ ^[0-9]+$ ]] || die "could not determine owner of $REMOTE_HOME"
+
 FREE_KIB=$(df -Pk "$OUTPUT_DIR" | awk 'NR == 2 { print $4 }')
 [[ "$FREE_KIB" =~ ^[0-9]+$ ]] || die "could not determine free space in $OUTPUT_DIR"
-# ZIP output can be slightly larger than its inputs, especially for incompressible files.
 REQUIRED_KIB=$(( SOURCE_KIB + (SOURCE_KIB + 19) / 20 ))
 printf 'Remote home:      %s (%s used)\n' "$REMOTE_HOME" "$(human_kib "$SOURCE_KIB")"
 printf 'Local free space: %s\n' "$(human_kib "$FREE_KIB")"
@@ -117,26 +120,36 @@ fi
 
 HOME_NAME=${REMOTE_HOME##*/}
 STAMP=$(date +%Y%m%d-%H%M%S)
-FINAL_FILE="$OUTPUT_DIR/steamos-${HOME_NAME}-home-${STAMP}.zip"
+FINAL_FILE="$OUTPUT_DIR/steamos-${HOME_NAME}-home-${STAMP}.tar.zst"
 PARTIAL_FILE="$FINAL_FILE.partial"
 [[ ! -e "$FINAL_FILE" && ! -e "$PARTIAL_FILE" ]] || die "destination already exists: $FINAL_FILE"
 
-if [[ "$INCLUDE_DOT_STEAM_BACKUPS" == true ]]; then
-  printf -v zip_script 'cd /home && exec zip -q -r -y - %q' "$HOME_NAME"
-else
-  printf -v zip_script 'cd /home && exec zip -q -r -y - %q -x '\''*/dot-steam.bak.*/*'\''' "$HOME_NAME"
-fi
+printf -v archive_script 'set -Eeuo pipefail
+home_name=%q
+source_kib=%q
+home_uid=%q
+home_gid=%q
+include_dot_steam_backups=%q
+tmpdir=$(mktemp -d /tmp/steamos-home-backup.XXXXXX)
+trap '\''rm -rf "$tmpdir"'\'' EXIT
+printf '\''format=steamos-home-tar-zst-v1\nsource_disk_kib=%%s\nhome_uid=%%s\nhome_gid=%%s\nhome_name=%%s\n'\'' "$source_kib" "$home_uid" "$home_gid" "$home_name" >"$tmpdir/manifest"
+exclude=()
+[[ "$include_dot_steam_backups" == true ]] || exclude=(--exclude='\''*/dot-steam.bak.*'\'')
+tar --acls --xattrs --xattrs-include='\''*'\'' --numeric-owner --sparse "${exclude[@]}" \
+  --transform="s,^manifest$,$home_name/.steamos-home-backup-manifest," \
+  -C "$tmpdir" -cf - manifest -C /home "$home_name" | zstd -q -T0 -3' \
+  "$HOME_NAME" "$SOURCE_KIB" "$HOME_UID" "$HOME_GID" "$INCLUDE_DOT_STEAM_BACKUPS"
+
 printf 'Creating compressed archive on %s and streaming it to %s\n' "$HOST" "$FINAL_FILE"
-remote_sudo "$zip_script" >"$PARTIAL_FILE"
-unzip -tqq "$PARTIAL_FILE" >/dev/null || die "the received ZIP failed validation"
+remote_sudo "$archive_script" >"$PARTIAL_FILE"
+zstd -tq "$PARTIAL_FILE"
+zstd -d -q -c "$PARTIAL_FILE" | tar -tf - >/dev/null
 mv "$PARTIAL_FILE" "$FINAL_FILE"
 PARTIAL_FILE=
 
 if command -v shasum >/dev/null 2>&1; then
   CHECKSUM=$(shasum -a 256 "$FINAL_FILE" | awk '{print $1}')
-elif command -v sha256sum >/dev/null 2>&1; then
-  CHECKSUM=$(sha256sum "$FINAL_FILE" | awk '{print $1}')
 else
-  CHECKSUM='(no SHA-256 tool available)'
+  CHECKSUM=$(sha256sum "$FINAL_FILE" | awk '{print $1}')
 fi
 printf 'Backup complete: %s\nSHA-256: %s\n' "$FINAL_FILE" "$CHECKSUM"

@@ -17,10 +17,11 @@ export STEAMOS_USER=steamosadmin
 ```
 
 The default source is `/home/deck`. The backup is a dated
-`steamos-deck-home-YYYYMMDD-HHMMSS.zip` on your Desktop. SteamOS creates the
-ZIP and streams it directly to the host, so a large temporary copy is not left
-on SteamOS. Before beginning, the script checks the host has at least the
-source's current disk usage plus 5% free.
+`steamos-deck-home-YYYYMMDD-HHMMSS.tar.zst` on your Desktop. SteamOS creates
+and Zstandard-compresses the tar archive, then streams it directly to the
+host, so a large temporary copy is not left on SteamOS. Before beginning, the
+script checks the host has at least the source's current disk usage plus 5%
+free.
 
 Add `--dry-run` to exercise the SSH, sudo, and capacity checks without
 creating an archive.
@@ -30,15 +31,16 @@ usually obsolete Steam migration backups, while the active Steam paths are
 included. To retain them deliberately, pass `--include-dot-steam-backups`.
 
 Use `--remote-home` for another direct child of `/home`, and `--output-dir`
-to choose a different local destination. The script validates the completed ZIP
-and prints its SHA-256.
+to choose a different local destination. The script validates the completed
+archive and prints its SHA-256. The archive preserves numeric ownership, modes,
+ACLs, extended attributes, hard links, symlinks, and sparse files.
 
 ## Restore a backup
 
 After installing SteamOS and creating the target account again:
 
 ```bash
-./restore-steamos-home.sh ~/Desktop/steamos-deck-home-20260710-120000.zip
+./restore-steamos-home.sh ~/Desktop/steamos-deck-home-20260710-120000.tar.zst
 ```
 
 The script validates the archive locally, rejects path-traversal paths, checks
@@ -49,7 +51,7 @@ The default mode safely merges into the existing home. For a fresh SteamOS
 installation, use `--replace`:
 
 ```bash
-./restore-steamos-home.sh --replace ~/Desktop/steamos-deck-home-20260710-120000.zip
+./restore-steamos-home.sh --replace ~/Desktop/steamos-deck-home-20260710-120000.tar.zst
 ```
 
 `--replace` moves the prior directory to a timestamped
@@ -57,10 +59,10 @@ installation, use `--replace`:
 restore, remove that directory manually to reclaim space. Do not restore while
 the target account is running Steam, Desktop Mode, or other applications.
 
-ZIP is chosen because it is easy to carry between machines. It preserves files,
-hidden files, and symlinks, but not Linux ownership, ACLs, extended attributes,
-or hard links. Restore normalizes ownership to the account that owns the target
-home.
+Restore verifies the archive's metadata and requires the target account to have
+the same UID and primary GID as the backed-up home. This prevents a seemingly
+successful restore from silently changing ownership. A standard SteamOS
+reinstall normally recreates `deck` with the same IDs.
 
 ## Inspect A/B slot and update state
 
