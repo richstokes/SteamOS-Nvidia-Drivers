@@ -232,10 +232,13 @@ EOF
 sudo systemctl restart sddm
 ```
 
-For some NVIDIA systems, `STEAMOS_NVIDIA_GAMESCOPE_FORCE_COMPOSITION=1` can be
-added to the same drop-in to disable Gamescope direct scan-out. This may avoid
-display corruption at the cost of a small amount of latency and GPU work; leave
-it unset unless it demonstrably improves the output.
+This repository's NVIDIA Gamescope wrapper also recognizes
+`STEAMOS_NVIDIA_GAMESCOPE_FORCE_COMPOSITION=1`. This is not a Valve or
+Gamescope environment variable: it makes the wrapper add Gamescope's real
+[`--force-composition`](https://github.com/ValveSoftware/gamescope/blob/master/src/main.cpp)
+flag, which disables direct scan-out. It may avoid display corruption at the
+cost of a small amount of latency and GPU work; leave it unset unless it
+demonstrably improves the output.
 
 For stable high-refresh 4K on NVIDIA, use SteamOS Desktop Mode instead: set
 the output mode in KDE Display Configuration, then launch Steam Big Picture.
