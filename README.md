@@ -63,7 +63,7 @@ before flashing - see step 3 below!
 
 > You only need to do this step if you were not able to get SSH enabled by following the regular SteamOS install process above.
 
-`patch-steamos-ssh-admin.sh` patches a SteamOS image so it boots with SSH
+`patch-steamos-ssh-admin.sh` patches a SteamOS image so it installs with SSH
 enabled and creates a sudo-capable admin user.
 
 Default credentials:
