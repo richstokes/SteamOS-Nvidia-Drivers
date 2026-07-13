@@ -6,26 +6,26 @@
 
 This is extremely experimental. I mostly did this to see if I could.. turns out I can!  
 
-"It works on my machine", but there are absolutely no guarantees it will work for you.
+"It works on my machine", but there are obviously no guarantees it will work for you.
 
 SteamOS does not officially support NVIDIA desktop GPUs. Expect rough edges,
 especially around Gamescope, display modes, HDR, VRR, and SteamOS updates.
 
-Disclaimers out the way, I will say that once setup, SteamOS works great with my Nvidia GPU! Everything seems stable and games perform well.
+Disclaimers out the way, I will say that once setup, _SteamOS works great with my Nvidia GPU_! Everything seems stable and games perform well.
+
+This was a fun challenge and turned out to be interesting, as installing SteamOS as-is left me with a black screen and unresponsive keyboard. To work around that, I ended up modifying the installer image to enable SSH by default, such that the Nvidia drivers can be installed remotely. You may have better luck than my black screen, so modifying the installer is optional.
 
 ## How to
 
-This method relies on you having another machine which you will use to SSH into SteamOS in order to install the drivers. Using SSH to remotely set up SteamOS was really helpful here, since when I tried the regular SteamOS install, it would boot into a black screen and was unresponsive to keyboard input.
+This method relies on you having another machine which you will use to SSH into SteamOS in order to install the drivers. SSH also provides a remote way in to debug/fix the system if a future/bad update breaks something.
 
-Being able to remotely connect in via SSH allows us to run the scripts from this repo to successfully install the Nvidia drivers. SSH also provides a remote way in to debug/fix the system if a future/bad update breaks something.
-
-A requirement is that the Steam PC is connected to your network via Ethernet.
+A requirement is that the SteamOS PC is connected to your network via Ethernet.
 
 So the super-high-level flow is:
 
 1. Install SteamOS
 2. Enable SSH for remote access
-3. Run these scripts, which install and configure the nvidia driver
+3. Run a script, which installs and configures the nvidia driver
 
 Tested from a MacBook against a fresh SteamOS 3.8.14 PC install with:
 
