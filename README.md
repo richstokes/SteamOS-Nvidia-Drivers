@@ -60,7 +60,7 @@ After install, one of two things usually happens:
 - You get a working desktop and should [enable SSH normally](https://www.reddit.com/r/SteamDeck/comments/tz490v/enable_ssh_on_the_deck/).
 - You get a black screen or an unresponsive keyboard and cannot use the desktop environment.
 
-If you cannot reach a working desktop and enable SSH, create an "SSH-enabled-by-default" SteamOS image
+If you cannot reach a working desktop to enable SSH, create an "SSH-enabled-by-default" SteamOS image
 before flashing - see step 3 below!
 
 ### 3. Optional: Create An SSH-Enabled Image
