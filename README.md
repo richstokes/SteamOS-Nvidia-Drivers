@@ -1,6 +1,6 @@
 # SteamOS-Nvidia-Drivers
 
-𝖨̶𝗇̶𝗌̶𝗍̶𝗋̶𝗎̶𝖼̶𝗍̶𝗂̶𝗈̶𝗇̶𝗌̶ 𝖺̶𝗇̶𝖽̶ 𝗌̶𝖼̶𝗋̶𝗂̶𝗉̶𝗍̶𝗌̶ Mad hax for installing SteamOS on a PC with an NVIDIA GPU.
+𝖨̶𝗇̶𝗌̶𝗍̶𝗋̶𝗎̶𝖼̶𝗍̶𝗂̶𝗈̶𝗇̶𝗌̶ Mad hax for installing SteamOS on a PC with an NVIDIA GPU.
 
 ## Current status
 
@@ -11,13 +11,13 @@ This is extremely experimental. I mostly did this to see if I could.. turns out 
 SteamOS does not officially support NVIDIA desktop GPUs. Expect rough edges,
 especially around Gamescope, display modes, HDR, VRR, and SteamOS updates.
 
-Disclaimers out the way, I will say that once setup, _SteamOS works great with my Nvidia GPU_! Everything seems stable and games perform well.
+Disclaimers out the way, I will say that once setup, _SteamOS works great with my Nvidia GPU!_ Everything seems stable and games perform well.
 
 This was a fun challenge and turned out to be interesting, as installing SteamOS as-is left me with a black screen and unresponsive keyboard. To work around that, I ended up modifying the installer image to enable SSH by default, such that the Nvidia drivers can be installed remotely. You may have better luck than my black screen, so modifying the installer is optional.
 
 ## How to
 
-This method relies on you having another machine which you will use to SSH into SteamOS in order to install the drivers. SSH also provides a remote way in to debug/fix the system if a future/bad update breaks something.
+This method relies on you having another machine which you will use to SSH into SteamOS in order to install the drivers. SSH also provides a remote way in to debug/fix the system if a future update breaks something.
 
 A requirement is that the SteamOS PC is connected to your network via Ethernet.
 
