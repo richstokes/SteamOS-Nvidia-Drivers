@@ -30,6 +30,13 @@ By default, timestamped `dot-steam.bak.*` directories are excluded. These are
 usually obsolete Steam migration backups, while the active Steam paths are
 included. To retain them deliberately, pass `--include-dot-steam-backups`.
 
+To exclude data Steam can download or reinstall, pass
+`--exclude-steam-game-data`. This omits installed game directories, Workshop
+content, in-progress downloads, and Steam shader/content caches from every
+Steam library under the home directory. It keeps Steam account metadata,
+controller settings, compatibility prefixes, and saves, including saves stored
+inside a Proton prefix.
+
 Use `--remote-home` for another direct child of `/home`, and `--output-dir`
 to choose a different local destination. The script validates the completed
 archive and prints its SHA-256. The archive preserves numeric ownership, modes,

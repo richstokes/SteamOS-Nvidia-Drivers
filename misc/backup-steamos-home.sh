@@ -18,6 +18,9 @@ Options:
   -o, --output-dir PATH    Destination directory. Default: ~/Desktop.
       --include-dot-steam-backups
                            Include dot-steam.bak.<timestamp> directories.
+      --exclude-steam-game-data
+                           Exclude reinstallable Steam game content, Workshop
+                           content, downloads, and shader/content caches.
       --dry-run            Run connection and capacity checks only.
   -h, --help               Show this help.
 EOF
@@ -85,6 +88,7 @@ SSH_USER=${STEAMOS_USER:-steamosadmin}
 REMOTE_HOME=/home/deck
 OUTPUT_DIR="$HOME/Desktop"
 INCLUDE_DOT_STEAM_BACKUPS=false
+EXCLUDE_STEAM_GAME_DATA=false
 DRY_RUN=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -93,6 +97,7 @@ while [[ $# -gt 0 ]]; do
     -r|--remote-home) [[ $# -ge 2 ]] || die "$1 requires a value"; REMOTE_HOME=$2; shift 2 ;;
     -o|--output-dir) [[ $# -ge 2 ]] || die "$1 requires a value"; OUTPUT_DIR=$2; shift 2 ;;
     --include-dot-steam-backups) INCLUDE_DOT_STEAM_BACKUPS=true; shift ;;
+    --exclude-steam-game-data) EXCLUDE_STEAM_GAME_DATA=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1" ;;
@@ -149,11 +154,25 @@ init_remote_sudo
 remote 'tar --version 2>/dev/null | grep -q "^tar (GNU tar)" && command -v zstd >/dev/null' ||
   die "SteamOS needs GNU tar and zstd"
 
-if [[ "$INCLUDE_DOT_STEAM_BACKUPS" == true ]]; then
-  printf -v du_script 'test -d %q && du -sk -- %q | awk '\''NR == 1 { print $1 }'\''' "$REMOTE_HOME" "$REMOTE_HOME"
-else
-  printf -v du_script 'test -d %q && du -sk --exclude='\''*/dot-steam.bak.*'\'' %q | awk '\''NR == 1 { print $1 }'\''' "$REMOTE_HOME" "$REMOTE_HOME"
+printf -v du_script 'set -e
+home=%q
+include_dot_steam_backups=%q
+exclude_steam_game_data=%q
+exclude=()
+[[ "$include_dot_steam_backups" == true ]] || exclude+=(--exclude='\''*/dot-steam.bak.*'\'')
+if [[ "$exclude_steam_game_data" == true ]]; then
+  exclude+=(
+    --exclude='\''*/steamapps/common'\''
+    --exclude='\''*/steamapps/workshop/content'\''
+    --exclude='\''*/steamapps/downloading'\''
+    --exclude='\''*/steamapps/shadercache'\''
+    --exclude='\''*/steamapps/temp'\''
+    --exclude='\''*/steamapps/depotcache'\''
+  )
 fi
+test -d "$home"
+du -sk "${exclude[@]}" -- "$home" | awk '\''NR == 1 { print $1 }'\''' \
+  "$REMOTE_HOME" "$INCLUDE_DOT_STEAM_BACKUPS" "$EXCLUDE_STEAM_GAME_DATA"
 SOURCE_KIB=$(remote_sudo "$du_script")
 [[ "$SOURCE_KIB" =~ ^[0-9]+$ ]] || die "could not determine disk usage for $REMOTE_HOME"
 
@@ -165,6 +184,9 @@ FREE_KIB=$(df -Pk "$OUTPUT_DIR" | awk 'NR == 2 { print $4 }')
 [[ "$FREE_KIB" =~ ^[0-9]+$ ]] || die "could not determine free space in $OUTPUT_DIR"
 REQUIRED_KIB=$(( SOURCE_KIB + (SOURCE_KIB + 19) / 20 ))
 printf 'Remote home:      %s (%s used)\n' "$REMOTE_HOME" "$(human_kib "$SOURCE_KIB")"
+if [[ "$EXCLUDE_STEAM_GAME_DATA" == true ]]; then
+  printf 'Steam game data:  excluded (installed, Workshop, download, and shader/cache data)\n'
+fi
 printf 'Local free space: %s\n' "$(human_kib "$FREE_KIB")"
 printf 'Required minimum: %s (source usage + 5%%)\n' "$(human_kib "$REQUIRED_KIB")"
 (( FREE_KIB >= REQUIRED_KIB )) || die "not enough free space in $OUTPUT_DIR; backup was not started"
@@ -185,15 +207,26 @@ source_kib=%q
 home_uid=%q
 home_gid=%q
 include_dot_steam_backups=%q
+exclude_steam_game_data=%q
 tmpdir=$(mktemp -d /tmp/steamos-home-backup.XXXXXX)
 trap '\''rm -rf "$tmpdir"'\'' EXIT
 printf '\''format=steamos-home-tar-zst-v1\nsource_disk_kib=%%s\nhome_uid=%%s\nhome_gid=%%s\nhome_name=%%s\n'\'' "$source_kib" "$home_uid" "$home_gid" "$home_name" >"$tmpdir/manifest"
 exclude=()
-[[ "$include_dot_steam_backups" == true ]] || exclude=(--exclude='\''*/dot-steam.bak.*'\'')
+[[ "$include_dot_steam_backups" == true ]] || exclude+=(--exclude='\''*/dot-steam.bak.*'\'')
+if [[ "$exclude_steam_game_data" == true ]]; then
+  exclude+=(
+    --exclude='\''*/steamapps/common'\''
+    --exclude='\''*/steamapps/workshop/content'\''
+    --exclude='\''*/steamapps/downloading'\''
+    --exclude='\''*/steamapps/shadercache'\''
+    --exclude='\''*/steamapps/temp'\''
+    --exclude='\''*/steamapps/depotcache'\''
+  )
+fi
 tar --warning=no-file-ignored --acls --xattrs --xattrs-include='\''*'\'' --numeric-owner --sparse "${exclude[@]}" \
   --transform="s,^manifest$,$home_name/.steamos-home-backup-manifest," \
   -C "$tmpdir" -cf - manifest -C /home "$home_name" | zstd -q -T0 -3' \
-  "$HOME_NAME" "$SOURCE_KIB" "$HOME_UID" "$HOME_GID" "$INCLUDE_DOT_STEAM_BACKUPS"
+  "$HOME_NAME" "$SOURCE_KIB" "$HOME_UID" "$HOME_GID" "$INCLUDE_DOT_STEAM_BACKUPS" "$EXCLUDE_STEAM_GAME_DATA"
 
 printf 'Creating compressed archive on %s and streaming it to %s\n' "$HOST" "$FINAL_FILE"
 printf 'Archive size is not known until compression finishes; reporting received bytes every 5 seconds.\n'
