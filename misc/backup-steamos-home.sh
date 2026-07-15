@@ -91,7 +91,7 @@ cleanup() {
 trap cleanup EXIT
 
 init_remote_sudo
-remote 'command -v tar >/dev/null && command -v zstd >/dev/null' ||
+remote 'tar --version 2>/dev/null | grep -q "^tar (GNU tar)" && command -v zstd >/dev/null' ||
   die "SteamOS needs GNU tar and zstd"
 
 if [[ "$INCLUDE_DOT_STEAM_BACKUPS" == true ]]; then
@@ -135,7 +135,7 @@ trap '\''rm -rf "$tmpdir"'\'' EXIT
 printf '\''format=steamos-home-tar-zst-v1\nsource_disk_kib=%%s\nhome_uid=%%s\nhome_gid=%%s\nhome_name=%%s\n'\'' "$source_kib" "$home_uid" "$home_gid" "$home_name" >"$tmpdir/manifest"
 exclude=()
 [[ "$include_dot_steam_backups" == true ]] || exclude=(--exclude='\''*/dot-steam.bak.*'\'')
-tar --acls --xattrs --xattrs-include='\''*'\'' --numeric-owner --sparse "${exclude[@]}" \
+tar --warning=no-file-ignored --acls --xattrs --xattrs-include='\''*'\'' --numeric-owner --sparse "${exclude[@]}" \
   --transform="s,^manifest$,$home_name/.steamos-home-backup-manifest," \
   -C "$tmpdir" -cf - manifest -C /home "$home_name" | zstd -q -T0 -3' \
   "$HOME_NAME" "$SOURCE_KIB" "$HOME_UID" "$HOME_GID" "$INCLUDE_DOT_STEAM_BACKUPS"
