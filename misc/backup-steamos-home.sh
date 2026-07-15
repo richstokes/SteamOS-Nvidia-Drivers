@@ -31,6 +31,54 @@ human_kib() {
   elif (( kib >= 1024 )); then awk "BEGIN { printf \"%.1f MiB\", $kib / 1024 }"
   else printf '%s KiB' "$kib"; fi
 }
+filesystem_type() {
+  local path=$1 type=
+  if [[ $(uname -s) == Darwin ]] && command -v diskutil >/dev/null 2>&1; then
+    type=$(diskutil info "$path" 2>/dev/null | awk -F: '/File System Personality/ { gsub(/^[[:space:]]+/, "", $2); print tolower($2); exit }')
+  fi
+  if [[ -z "$type" ]]; then
+    type=$(stat -f -c %T "$path" 2>/dev/null || stat -f %T "$path" 2>/dev/null || true)
+    type=${type,,}
+  fi
+  printf '%s' "$type"
+}
+stream_to_file() {
+  local output=$1
+  python3 -c '
+import os
+import sys
+import time
+
+path = sys.argv[1]
+received = 0
+started = last_report = time.monotonic()
+
+def format_bytes(value):
+    units = ("B", "KiB", "MiB", "GiB", "TiB")
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            return f"{value:.1f} {unit}" if unit != "B" else f"{value} B"
+        value /= 1024
+
+try:
+    with open(path, "wb") as destination:
+        while chunk := sys.stdin.buffer.read(1024 * 1024):
+            destination.write(chunk)
+            received += len(chunk)
+            now = time.monotonic()
+            if now - last_report >= 5:
+                rate = received / (now - started)
+                print(f"\rReceived: {format_bytes(received)} | Average: {format_bytes(rate)}/s", end="", file=sys.stderr, flush=True)
+                last_report = now
+except OSError as error:
+    print(f"\nerror: cannot write {path}: {error}", file=sys.stderr)
+    sys.exit(1)
+
+elapsed = time.monotonic() - started
+rate = received / elapsed if elapsed else 0
+print(f"\rReceived: {format_bytes(received)} | Average: {format_bytes(rate)}/s", file=sys.stderr)
+' "$output"
+}
 
 HOST=${STEAMOS_HOST:-}
 SSH_USER=${STEAMOS_USER:-steamosadmin}
@@ -58,9 +106,16 @@ require_cmd ssh
 require_cmd tar
 require_cmd zstd
 require_cmd df
+require_cmd python3
 
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_DIR=$(cd "$OUTPUT_DIR" && pwd)
+OUTPUT_FILESYSTEM=$(filesystem_type "$OUTPUT_DIR")
+case "$OUTPUT_FILESYSTEM" in
+  *fat32*|msdos|vfat|fat)
+    die "$OUTPUT_DIR is on FAT32, which cannot store files larger than 4 GiB; use APFS, exFAT, or another filesystem that supports large files"
+    ;;
+esac
 TARGET="$SSH_USER@$HOST"
 SSH=(ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 "$TARGET")
 remote() { "${SSH[@]}" "$1"; }
@@ -141,7 +196,20 @@ tar --warning=no-file-ignored --acls --xattrs --xattrs-include='\''*'\'' --numer
   "$HOME_NAME" "$SOURCE_KIB" "$HOME_UID" "$HOME_GID" "$INCLUDE_DOT_STEAM_BACKUPS"
 
 printf 'Creating compressed archive on %s and streaming it to %s\n' "$HOST" "$FINAL_FILE"
-remote_sudo "$archive_script" >"$PARTIAL_FILE"
+printf 'Archive size is not known until compression finishes; reporting received bytes every 5 seconds.\n'
+set +e
+remote_sudo "$archive_script" | stream_to_file "$PARTIAL_FILE"
+PIPELINE_STATUS=("${PIPESTATUS[@]}")
+set -e
+REMOTE_STATUS=${PIPELINE_STATUS[0]}
+WRITE_STATUS=${PIPELINE_STATUS[1]}
+if (( REMOTE_STATUS != 0 && WRITE_STATUS != 0 )); then
+  die "the remote archive command failed (exit $REMOTE_STATUS) and writing the local archive failed (exit $WRITE_STATUS)"
+elif (( REMOTE_STATUS != 0 )); then
+  die "the remote archive command failed (exit $REMOTE_STATUS)"
+elif (( WRITE_STATUS != 0 )); then
+  die "writing the local archive failed (exit $WRITE_STATUS)"
+fi
 zstd -tq "$PARTIAL_FILE"
 zstd -d -q -c "$PARTIAL_FILE" | tar -tf - >/dev/null
 mv "$PARTIAL_FILE" "$FINAL_FILE"

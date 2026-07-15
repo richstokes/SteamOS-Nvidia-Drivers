@@ -35,6 +35,10 @@ to choose a different local destination. The script validates the completed
 archive and prints its SHA-256. The archive preserves numeric ownership, modes,
 ACLs, extended attributes, hard links, symlinks, and sparse files.
 
+The destination filesystem must support files larger than 4 GiB. FAT32 cannot
+store a home-directory archive of this size and is rejected before the backup
+starts; use APFS, exFAT, or another large-file-capable filesystem instead.
+
 ## Restore a backup
 
 After installing SteamOS and creating the target account again:
