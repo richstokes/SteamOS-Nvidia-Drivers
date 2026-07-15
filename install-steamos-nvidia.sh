@@ -170,9 +170,11 @@ dkms_tree="$DKMS_DIR"
 tmp_location="$DKMS_TMP_DIR"
 EOF
 
-  if [[ -d /var/lib/dkms && ! -L /var/lib/dkms ]]; then
+  if [[ "$DKMS_DIR" != /var/lib/dkms && -d /var/lib/dkms && ! -L /var/lib/dkms ]]; then
     log "Migrating existing DKMS state from /var/lib/dkms to $DKMS_DIR"
-    cp -a /var/lib/dkms/. "$DKMS_DIR"/ 2>/dev/null || true
+    cp -a /var/lib/dkms/. "$DKMS_DIR"/
+    rm -rf /var/lib/dkms
+    install -d -m 0755 /var/lib/dkms
   fi
 
   if [[ -L /var/lib/dkms && "$(readlink /var/lib/dkms)" == "$DKMS_DIR" ]]; then
