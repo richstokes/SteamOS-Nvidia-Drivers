@@ -436,35 +436,54 @@ patched_script=$(mktemp -p "$tmp_parent" steamos-nvidia-gamescope-session.XXXXXX
 trap 'rm -f "$patched_script"' EXIT
 
 awk -v width="$width" -v height="$height" -v refresh="$refresh" -v force_composition="$force_composition" '
-  $0 == "export STEAM_GAMESCOPE_HDR_SUPPORTED=1" {
-    print "export STEAM_GAMESCOPE_HDR_SUPPORTED=0"
+  /^[[:space:]]*export[[:space:]]+STEAM_GAMESCOPE_HDR_SUPPORTED=[[:space:]]*1([[:space:]]*(#.*)?)?$/ {
+    sub(/=[[:space:]]*1/, "=0")
+    hdr++
+    print
     next
   }
-  $0 == "export STEAM_GAMESCOPE_VRR_SUPPORTED=1" {
-    print "export STEAM_GAMESCOPE_VRR_SUPPORTED=0"
+  /^[[:space:]]*export[[:space:]]+STEAM_GAMESCOPE_VRR_SUPPORTED=[[:space:]]*1([[:space:]]*(#.*)?)?$/ {
+    sub(/=[[:space:]]*1/, "=0")
+    vrr++
+    print
     next
   }
-  $0 == "export STEAM_GAMESCOPE_COLOR_MANAGED=1" {
-    print "export STEAM_GAMESCOPE_COLOR_MANAGED=0"
+  /^[[:space:]]*export[[:space:]]+STEAM_GAMESCOPE_COLOR_MANAGED=[[:space:]]*1([[:space:]]*(#.*)?)?$/ {
+    sub(/=[[:space:]]*1/, "=0")
+    color_managed++
+    print
     next
   }
-  $0 == "export STEAM_GAMESCOPE_VIRTUAL_WHITE=1" {
-    print "export STEAM_GAMESCOPE_VIRTUAL_WHITE=0"
+  /^[[:space:]]*export[[:space:]]+STEAM_GAMESCOPE_VIRTUAL_WHITE=[[:space:]]*1([[:space:]]*(#.*)?)?$/ {
+    sub(/=[[:space:]]*1/, "=0")
+    virtual_white++
+    print
     next
   }
-  $0 == "\texport STEAM_GAMESCOPE_FORCE_HDR_DEFAULT=1" {
-    print "\texport STEAM_GAMESCOPE_FORCE_HDR_DEFAULT=0"
+  /^[[:space:]]*export[[:space:]]+STEAM_GAMESCOPE_FORCE_HDR_DEFAULT=[[:space:]]*1([[:space:]]*(#.*)?)?$/ {
+    sub(/=[[:space:]]*1/, "=0")
+    force_hdr++
+    print
     next
   }
-  $0 == "\texport STEAM_GAMESCOPE_FORCE_OUTPUT_TO_HDR10PQ_DEFAULT=1" {
-    print "\texport STEAM_GAMESCOPE_FORCE_OUTPUT_TO_HDR10PQ_DEFAULT=0"
+  /^[[:space:]]*export[[:space:]]+STEAM_GAMESCOPE_FORCE_OUTPUT_TO_HDR10PQ_DEFAULT=[[:space:]]*1([[:space:]]*(#.*)?)?$/ {
+    sub(/=[[:space:]]*1/, "=0")
+    force_hdr10pq++
+    print
     next
   }
-  /^[[:space:]]*--generate-drm-mode fixed \\/ {
+  /^[[:space:]]*--generate-drm-mode[[:space:]]+fixed[[:space:]]*\\[[:space:]]*$/ {
+    drm_mode++
     if (force_composition == 1) print "\t\t--force-composition \\"
     printf "\t\t-W %s -H %s -r %s \\\n", width, height, refresh
   }
   { print }
+  END {
+    if (hdr != 1 || vrr != 1 || color_managed != 1 || virtual_white != 1 || force_hdr != 1 || force_hdr10pq != 1 || drm_mode != 1) {
+      printf "SteamOS Gamescope wrapper layout changed; NVIDIA override was not applied (HDR=%d, VRR=%d, color=%d, white=%d, force-HDR=%d, HDR10PQ=%d, DRM-mode=%d)\n", hdr, vrr, color_managed, virtual_white, force_hdr, force_hdr10pq, drm_mode > "/dev/stderr"
+      exit 1
+    }
+  }
 ' "$source_script" >"$patched_script"
 
 chmod 0700 "$patched_script"
