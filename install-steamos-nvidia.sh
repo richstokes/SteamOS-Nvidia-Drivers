@@ -176,11 +176,6 @@ EOF
     rm -rf /var/lib/dkms
     install -d -m 0755 /var/lib/dkms
   fi
-
-  if [[ -L /var/lib/dkms && "$(readlink /var/lib/dkms)" == "$DKMS_DIR" ]]; then
-    rm -f /var/lib/dkms
-    install -d -m 0755 /var/lib/dkms
-  fi
 }
 
 install_build_stack() {
