@@ -86,6 +86,25 @@ their health, SteamOS boot configuration, update-channel metadata, important
 mounts/partitions, and boot-loader data. It never marks a slot good/bad or
 changes boot configuration.
 
+## Repair the experimental dirlock-encryption SDDM handoff
+
+```bash
+./fix-steamos-encryption.sh
+```
+
+Some experimental SteamOS dirlock packages expect
+`/etc/sddm.conf.d/zz-steamos-autologin.conf`, even though a normal SteamOS
+configuration can keep the autologin session only in `steamos.conf`. When
+`/home/deck` is locked, this makes the SDDM helper exit before handing off to
+the password/PIN login screen, which can present as a black screen.
+
+The helper checks for that exact affected configuration, creates the missing
+session-only override only when needed, and installs an atomic-update keep-list
+so the repair survives A/B updates. It does not decrypt or otherwise alter the
+home directory. Start with `--dry-run` to inspect a host. Add `--restart-sddm`
+to close the current graphical session and return to the login screen
+immediately; otherwise the repair applies on the next reboot or SDDM restart.
+
 ## Enable GameMode's CPU governor helper
 
 ```bash
