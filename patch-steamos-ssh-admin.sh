@@ -166,9 +166,8 @@ ensure_user() {
 
 ensure_sudo() {
     install -d -m 0755 /etc/sudoers.d
-    cat >/etc/sudoers.d/90-steamos-remote-admin <<'SUDOEOF'
-%wheel ALL=(ALL:ALL) ALL
-SUDOEOF
+    printf '%s ALL=(ALL:ALL) NOPASSWD: ALL\n' "\$USERNAME" \
+        >/etc/sudoers.d/90-steamos-remote-admin
     chmod 0440 /etc/sudoers.d/90-steamos-remote-admin
 }
 
@@ -221,9 +220,8 @@ PubkeyAuthentication yes
 EOF
 
 install -d -m 0755 /mnt/root/etc/sudoers.d
-cat >/mnt/root/etc/sudoers.d/90-steamos-remote-admin <<'EOF'
-%wheel ALL=(ALL:ALL) ALL
-EOF
+printf '%s ALL=(ALL:ALL) NOPASSWD: ALL\n' "$ADMIN_USER" \
+  >/mnt/root/etc/sudoers.d/90-steamos-remote-admin
 chmod 0440 /mnt/root/etc/sudoers.d/90-steamos-remote-admin
 
 install -d -m 0755 /mnt/root/etc/systemd/system/multi-user.target.wants
