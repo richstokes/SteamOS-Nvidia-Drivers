@@ -195,11 +195,13 @@ After the SteamOS PC reboots, SSH back in and check:
 
 ```bash
 ssh "$STEAMOS_USER@$STEAMOS_HOST" \
-  'lspci -nnk | sed -n "/VGA\\|3D\\|Display/,+5p"; nvidia-smi'
+  'lspci -nnk | sed -n "/VGA\\|3D\\|Display/,+5p"; nvidia-smi; lsmod | grep -E "^nvidia(_drm|_modeset)?"; ls -l /dev/dri'
 ```
 
 The NVIDIA PCI device should show `Kernel driver in use: nvidia`, and
-`nvidia-smi` should list the GPU.
+`nvidia-smi` should list the GPU. `nvidia_drm` must also be loaded and
+`/dev/dri/card0` must exist; those are required for the login screen and
+desktop to take control of the display.
 
 ## Gamescope Display Mode
 

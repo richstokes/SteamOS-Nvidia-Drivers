@@ -525,9 +525,11 @@ verify_install() {
   modinfo nvidia >/dev/null 2>&1 || die "nvidia module is not available to modinfo"
   command -v nvidia-smi >/dev/null 2>&1 || die "nvidia-smi was not installed"
 
-  if nvidia-smi >/dev/null 2>&1; then
-    log "nvidia-smi is working"
+  if nvidia_active; then
+    log "NVIDIA compute and DRM display drivers are working"
     rm -f "$FALLBACK_MARKER"
+  elif nvidia-smi >/dev/null 2>&1; then
+    log "NVIDIA compute driver is working but NVIDIA DRM is not active; reboot to activate display output"
   elif lsmod | awk '{print $1}' | grep -qx nouveau; then
     log "Nouveau is still loaded in this boot; reboot to bind NVIDIA"
   else
@@ -557,6 +559,7 @@ nvidia_active() {
   command -v nvidia-smi >/dev/null 2>&1 || return 1
   nvidia-smi >/dev/null 2>&1 || return 1
   ! lsmod | awk '{print \$1}' | grep -qx nouveau
+  lsmod | awk '{print \$1}' | grep -qx nvidia_drm
 }
 
 if nvidia_active; then
@@ -671,6 +674,7 @@ nvidia_active() {
   command -v nvidia-smi >/dev/null 2>&1 || return 1
   nvidia-smi >/dev/null 2>&1 || return 1
   ! lsmod | awk '{print $1}' | grep -qx nouveau
+  lsmod | awk '{print $1}' | grep -qx nvidia_drm
 }
 
 maybe_reboot() {
