@@ -13,8 +13,11 @@ ARCH_NVIDIA_DIR=${STEAMOS_NVIDIA_ARCH_DIR:-$STATE_DIR/arch-nvidia}
 ARCH_NVIDIA_DB=${STEAMOS_NVIDIA_ARCH_DB:-$ARCH_NVIDIA_DIR/db}
 ARCH_NVIDIA_CACHE=${STEAMOS_NVIDIA_ARCH_CACHE:-$ARCH_NVIDIA_DIR/cache}
 ARCH_NVIDIA_CONFIG=${STEAMOS_NVIDIA_ARCH_CONFIG:-$ARCH_NVIDIA_DIR/pacman.conf}
+BUILD_PACKAGE_STATE=${STEAMOS_NVIDIA_BUILD_PACKAGE_STATE:-$STATE_DIR/build-packages-installed-by-script}
+RUNTIME_OFFLOAD_MARKER=${STEAMOS_NVIDIA_RUNTIME_OFFLOAD_MARKER:-$STATE_DIR/runtime-offload-build-id}
 DKMS_PACKAGE=nvidia-open-dkms
 REBOOT=${STEAMOS_NVIDIA_REBOOT:-prompt} # prompt, yes, no
+RESTORE_READONLY=${STEAMOS_NVIDIA_RESTORE_READONLY:-yes} # yes, no
 
 ARCH_NVIDIA_PACKAGES=(
   nvidia-utils
@@ -134,6 +137,16 @@ root_free_mib() {
   df -Pm / | awk 'NR == 2 { print $4 }'
 }
 
+runtime_build_id() {
+  local build_id=
+
+  if [[ -r /etc/os-release ]]; then
+    build_id=$(sed -n 's/^BUILD_ID=//p' /etc/os-release | tr -d '"' | head -n1)
+  fi
+  build_id=${build_id:-$(uname -r)}
+  printf '%s' "$build_id" | tr -c 'A-Za-z0-9._-' '_'
+}
+
 is_exact_mountpoint() {
   [[ "$(findmnt -rn -T "$1" -o TARGET 2>/dev/null || true)" == "$1" ]]
 }
@@ -143,6 +156,31 @@ make_root_writable() {
     steamos-readonly disable || true
   elif findmnt -no OPTIONS / | tr ',' '\n' | grep -qx ro; then
     mount -o remount,rw /
+  fi
+}
+
+restore_root_readonly() {
+  case "$RESTORE_READONLY" in
+    yes)
+      ;;
+    no)
+      log "Leaving SteamOS read-only mode disabled by request"
+      return 0
+      ;;
+    *)
+      die "Invalid STEAMOS_NVIDIA_RESTORE_READONLY value: $RESTORE_READONLY"
+      ;;
+  esac
+
+  if ! command -v steamos-readonly >/dev/null 2>&1; then
+    log "SteamOS read-only helper is unavailable; root remains writable"
+    return 0
+  fi
+
+  if steamos-readonly enable; then
+    log "Restored SteamOS read-only mode"
+  else
+    log "WARNING: could not restore SteamOS read-only mode"
   fi
 }
 
@@ -197,10 +235,22 @@ EOF
 }
 
 install_build_stack() {
-  local kernel pkgbase headers
+  local kernel pkgbase headers pkg
+  local cleanup_candidates=()
   kernel=$(uname -r)
   pkgbase=$(kernel_pkgbase "$kernel")
   headers=$(header_package_for_kernel "$pkgbase")
+  cleanup_candidates=("$headers" "${BUILD_PACKAGES[@]}" libisl libmpc)
+
+  # Persist ownership before starting the transaction. If this run is
+  # interrupted, a later successful run can still remove packages that this
+  # installer introduced without touching packages the user already had.
+  {
+    [[ ! -r "$BUILD_PACKAGE_STATE" ]] || cat "$BUILD_PACKAGE_STATE"
+    for pkg in "${cleanup_candidates[@]}"; do
+      pacman -Q "$pkg" >/dev/null 2>&1 || printf '%s\n' "$pkg"
+    done
+  } | sort -u | write_file_atomically "$BUILD_PACKAGE_STATE" 0644
 
   log "Installing SteamOS DKMS build stack for $kernel using $headers"
   pacman -Sy --noconfirm
@@ -303,13 +353,38 @@ offload_dkms_source() {
 }
 
 remove_build_only_packages() {
-  local kernel pkgbase headers
-  kernel=$(uname -r)
-  pkgbase=$(kernel_pkgbase "$kernel")
-  headers=$(header_package_for_kernel "$pkgbase")
+  local pkg
+  local owned=()
+  local installed=()
+  local remaining=()
 
-  log "Removing temporary DKMS build packages"
-  pacman -Rdd --noconfirm "$headers" "${BUILD_PACKAGES[@]}" libisl libmpc || true
+  if [[ ! -r "$BUILD_PACKAGE_STATE" ]]; then
+    log "No installer-owned build packages need removal"
+    return 0
+  fi
+
+  mapfile -t owned <"$BUILD_PACKAGE_STATE"
+  for pkg in "${owned[@]}"; do
+    [[ -n "$pkg" ]] || continue
+    pacman -Q "$pkg" >/dev/null 2>&1 && installed+=("$pkg")
+  done
+
+  if ((${#installed[@]} > 0)); then
+    log "Removing build packages introduced by this installer: ${installed[*]}"
+    pacman -Rdd --noconfirm "${installed[@]}" || true
+  fi
+
+  for pkg in "${owned[@]}"; do
+    [[ -n "$pkg" ]] || continue
+    pacman -Q "$pkg" >/dev/null 2>&1 && remaining+=("$pkg")
+  done
+
+  if ((${#remaining[@]} > 0)); then
+    printf '%s\n' "${remaining[@]}" | sort -u | write_file_atomically "$BUILD_PACKAGE_STATE" 0644
+  else
+    rm -f "$BUILD_PACKAGE_STATE"
+  fi
+
   sync
   btrfs filesystem sync / >/dev/null 2>&1 || true
 }
@@ -340,47 +415,150 @@ remove_non_nvidia_gpu_packages() {
 }
 
 offload_root_directory() {
-  local source_dir=$1 offload_name=$2 target_dir fstab_line
-  target_dir="$OFFLOAD_DIR/$offload_name"
+  local source_dir=$1 offload_name=$2 generation_dir=$3
+  local target_dir fstab_line lower_view lower_marker staging backup='' mounted_source=0
+  target_dir="$generation_dir/$offload_name"
   fstab_line="$target_dir $source_dir none bind,x-systemd.requires-mounts-for=$OFFLOAD_DIR 0 0"
 
-  install -d -m 0755 "$OFFLOAD_DIR" "$target_dir"
+  install -d -m 0755 "$generation_dir" "$source_dir"
+
+  # Snapshot the currently visible tree before revealing the lower root-slot
+  # directory. On Btrfs this is normally a cheap reflink. It is the safe source
+  # for same-build reruns (whose lower directory was already reclaimed) and for
+  # migrating the legacy, unversioned offload layout.
+  staging=$(mktemp -d "$generation_dir/.${offload_name}.new.XXXXXX")
 
   if is_exact_mountpoint "$source_dir"; then
-    # An atomic update may already have mounted the persistent tree over a
-    # freshly populated directory in the new root slot. Temporarily reveal
-    # that lower directory so its duplicate files do not consume root space.
+    mounted_source=1
+    if ! cp -a --reflink=auto "$source_dir"/. "$staging"/; then
+      rm -rf "$staging"
+      return 1
+    fi
     if ! umount "$source_dir"; then
-      log "$source_dir is mounted and busy; retaining the existing offload"
-      return 0
+      log "ERROR: $source_dir is busy; cannot refresh its persistent offload safely"
+      rm -rf "$staging"
+      return 1
     fi
   fi
 
-  install -d -m 0755 "$source_dir"
-  if [[ -n "$(find "$source_dir" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
-    log "Offloading $source_dir to $target_dir"
-    cp -a "$source_dir"/. "$target_dir"/
-    find "$source_dir" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+  # Keep a second view of the new slot's lower directory. Once the new bind
+  # mount is active, this view lets us reclaim the hidden duplicate without a
+  # window where source_dir is empty or unrecoverable.
+  lower_view=$(mktemp -d /run/steamos-nvidia-lower.XXXXXX)
+  if ! mount --bind "$source_dir" "$lower_view"; then
+    rmdir "$lower_view"
+    rm -rf "$staging"
+    return 1
   fi
-  mount --bind "$target_dir" "$source_dir"
+  lower_marker="$lower_view/.steamos-nvidia-offloaded"
 
-  if ! grep -Fqs "$fstab_line" /etc/fstab; then
-    touch /etc/fstab
-    sed -i "\|[[:space:]]${source_dir}[[:space:]]|d" /etc/fstab
-    printf '%s\n' "$fstab_line" >>/etc/fstab
+  if [[ -e "$lower_marker" ]]; then
+    log "Refreshing $source_dir from its existing offload for SteamOS build $(runtime_build_id)"
+    if (( ! mounted_source )); then
+      log "ERROR: $source_dir has an offload marker but no mounted source tree"
+      umount "$lower_view" || true
+      rmdir "$lower_view" || true
+      rm -rf "$staging"
+      return 1
+    fi
+  elif [[ -n "$(find "$lower_view" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+    log "Staging exact $source_dir offload for SteamOS build $(runtime_build_id)"
+    find "$staging" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+    if ! cp -a --reflink=auto "$lower_view"/. "$staging"/; then
+      umount "$lower_view" || true
+      rmdir "$lower_view" || true
+      rm -rf "$staging"
+      return 1
+    fi
+  elif (( mounted_source )); then
+    log "Migrating legacy $source_dir offload into SteamOS build $(runtime_build_id)"
+  else
+    log "Staging empty $source_dir offload for SteamOS build $(runtime_build_id)"
   fi
+
+  if [[ -e "$target_dir" ]]; then
+    backup=$(mktemp -d "$generation_dir/.${offload_name}.previous.XXXXXX")
+    rmdir "$backup"
+    if ! mv "$target_dir" "$backup"; then
+      umount "$lower_view" || true
+      rmdir "$lower_view" || true
+      rm -rf "$staging"
+      return 1
+    fi
+  fi
+
+  if ! mv "$staging" "$target_dir"; then
+    [[ -z "$backup" ]] || mv "$backup" "$target_dir" || true
+    umount "$lower_view" || true
+    rmdir "$lower_view" || true
+    rm -rf "$staging"
+    return 1
+  fi
+
+  if ! mount --bind "$target_dir" "$source_dir"; then
+    rm -rf "$target_dir"
+    [[ -z "$backup" ]] || mv "$backup" "$target_dir" || true
+    umount "$lower_view" || true
+    rmdir "$lower_view" || true
+    return 1
+  fi
+
+  touch /etc/fstab
+  sed -i "\|[[:space:]]${source_dir}[[:space:]]|d" /etc/fstab
+  printf '%s\n' "$fstab_line" >>/etc/fstab
+
+  if ! find "$lower_view" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +; then
+    log "ERROR: could not reclaim the lower $source_dir directory"
+    umount "$lower_view" || true
+    rmdir "$lower_view" || true
+    return 1
+  fi
+  if ! printf '%s\n' "$(runtime_build_id)" >"$lower_marker"; then
+    umount "$lower_view" || true
+    rmdir "$lower_view" || true
+    return 1
+  fi
+  if ! umount "$lower_view"; then
+    log "ERROR: could not release temporary lower view for $source_dir"
+    return 1
+  fi
+  rmdir "$lower_view"
+  [[ -z "$backup" ]] || rm -rf "$backup"
 }
 
 offload_runtime_space() {
-  offload_root_directory /usr/share/fonts usr-share-fonts
-  offload_root_directory /usr/share/icons usr-share-icons
-  offload_root_directory /usr/share/ibus usr-share-ibus
-  offload_root_directory /usr/share/locale usr-share-locale
-  offload_root_directory /usr/share/qt6 usr-share-qt6
-  offload_root_directory /usr/share/wallpapers usr-share-wallpapers
-  offload_root_directory /usr/lib/steam usr-lib-steam
+  local build_id generation_dir
+  build_id=$(runtime_build_id)
+  generation_dir="$OFFLOAD_DIR/runtime/$build_id"
+
+  offload_root_directory /usr/share/fonts usr-share-fonts "$generation_dir"
+  offload_root_directory /usr/share/icons usr-share-icons "$generation_dir"
+  offload_root_directory /usr/share/ibus usr-share-ibus "$generation_dir"
+  offload_root_directory /usr/share/locale usr-share-locale "$generation_dir"
+  offload_root_directory /usr/share/qt6 usr-share-qt6 "$generation_dir"
+  offload_root_directory /usr/share/wallpapers usr-share-wallpapers "$generation_dir"
+  offload_root_directory /usr/lib/steam usr-lib-steam "$generation_dir"
   sync
   btrfs filesystem sync / >/dev/null 2>&1 || true
+  printf '%s\n' "$build_id" | write_file_atomically "$RUNTIME_OFFLOAD_MARKER" 0644
+  prune_runtime_offload_generations "$generation_dir"
+}
+
+prune_runtime_offload_generations() {
+  local current_dir=$1 candidate
+  local generations=()
+
+  [[ -d "$OFFLOAD_DIR/runtime" ]] || return 0
+  mapfile -t generations < <(
+    find "$OFFLOAD_DIR/runtime" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' |
+      sort -nr | awk 'NR > 3 { sub(/^[^ ]+ /, ""); print }'
+  )
+
+  for candidate in "${generations[@]}"; do
+    [[ -n "$candidate" && "$candidate" != "$current_dir" ]] || continue
+    log "Pruning old runtime offload generation ${candidate##*/}"
+    rm -rf -- "$candidate"
+  done
 }
 
 compress_btrfs_root_for_space() {
@@ -575,6 +753,7 @@ set -Eeuo pipefail
 PERSISTENT_INSTALL=$PERSISTENT_INSTALL
 FALLBACK_MARKER=$FALLBACK_MARKER
 ACTIVATION_MARKER=$STATE_DIR/nvidia-activation-reboot-requested
+RUNTIME_OFFLOAD_MARKER=$RUNTIME_OFFLOAD_MARKER
 REBOOT_DELAY_SEC=\${STEAMOS_NVIDIA_REBOOT_DELAY_SEC:-60}
 
 schedule_reboot() {
@@ -600,12 +779,55 @@ schedule_reboot() {
   systemctl reboot
 }
 
+runtime_build_id() {
+  local build_id=
+
+  if [[ -r /etc/os-release ]]; then
+    build_id=\$(sed -n 's/^BUILD_ID=//p' /etc/os-release | tr -d '"' | head -n1)
+  fi
+  build_id=\${build_id:-\$(uname -r)}
+  printf '%s' "\$build_id" | tr -c 'A-Za-z0-9._-' '_'
+}
+
+refresh_runtime_offloads() {
+  local current_build recorded_build='' installer
+  current_build=\$(runtime_build_id)
+  [[ ! -r "\$RUNTIME_OFFLOAD_MARKER" ]] || recorded_build=\$(<"\$RUNTIME_OFFLOAD_MARKER")
+  [[ "\$recorded_build" != "\$current_build" ]] || return 0
+
+  logger -t steamos-nvidia-ensure "Refreshing persistent runtime offloads for SteamOS build \$current_build"
+  for installer in "\$PERSISTENT_INSTALL" /etc/steamos-nvidia/install; do
+    [[ -x "\$installer" ]] || continue
+    if STEAMOS_NVIDIA_REBOOT=no "\$installer" --refresh-runtime-offloads; then
+      return 0
+    fi
+  done
+
+  logger -t steamos-nvidia-ensure "Runtime offload refresh failed; retaining the currently mounted generation"
+  return 1
+}
+
+make_root_writable() {
+  if command -v steamos-readonly >/dev/null 2>&1; then
+    steamos-readonly disable || true
+  elif findmnt -no OPTIONS / | tr ',' '\n' | grep -qx ro; then
+    mount -o remount,rw /
+  fi
+}
+
+restore_root_readonly() {
+  command -v steamos-readonly >/dev/null 2>&1 || return 0
+  steamos-readonly enable || logger -t steamos-nvidia-ensure "Could not restore SteamOS read-only mode after fallback preparation"
+}
+
 nvidia_active() {
   command -v nvidia-smi >/dev/null 2>&1 || return 1
   nvidia-smi >/dev/null 2>&1 || return 1
   ! lsmod | awk '{print \$1}' | grep -qx nouveau
   lsmod | awk '{print \$1}' | grep -qx nvidia_drm
 }
+
+refresh_runtime_offloads || true
 
 if nvidia_active; then
   rm -f "\$FALLBACK_MARKER" "\$ACTIVATION_MARKER"
@@ -645,6 +867,7 @@ if (( installer_succeeded )); then
 fi
 
 logger -t steamos-nvidia-ensure "NVIDIA reinstall failed; removing NVIDIA-only boot config"
+make_root_writable
 rm -f /etc/modprobe.d/steamos-nvidia.conf
 rm -f /etc/mkinitcpio.conf.d/30-nvidia.conf
 rm -f /etc/environment.d/90-nvidia.conf
@@ -653,6 +876,7 @@ modprobe nouveau >/dev/null 2>&1 || true
 if command -v mkinitcpio >/dev/null 2>&1; then
   mkinitcpio -P >/dev/null 2>&1 || true
 fi
+restore_root_readonly
 
 if [[ ! -e "\$FALLBACK_MARKER" ]]; then
   touch "\$FALLBACK_MARKER"
@@ -771,11 +995,19 @@ main() {
     --refresh-persistence)
       make_root_writable
       install_persistence_hooks
+      restore_root_readonly
       log "Refreshed persistent installer and boot-time recovery hooks"
       return 0
       ;;
+    --refresh-runtime-offloads)
+      make_root_writable
+      offload_runtime_space
+      restore_root_readonly
+      log "Refreshed persistent runtime offloads for SteamOS build $(runtime_build_id)"
+      return 0
+      ;;
     *)
-      die "Usage: $0 [--refresh-persistence]"
+      die "Usage: $0 [--refresh-persistence|--refresh-runtime-offloads]"
       ;;
   esac
 
@@ -802,6 +1034,7 @@ main() {
   verify_install
 
   log "Done. Root free space: $(root_free_mib) MiB"
+  restore_root_readonly
   maybe_reboot
 }
 

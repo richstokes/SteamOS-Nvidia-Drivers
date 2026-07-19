@@ -193,6 +193,9 @@ Useful environment overrides:
 ```bash
 # Reboot automatically after installation.
 STEAMOS_NVIDIA_REBOOT=yes sudo ./install-steamos-nvidia.sh
+
+# Leave the SteamOS root writable after installation for debugging.
+STEAMOS_NVIDIA_RESTORE_READONLY=no sudo ./install-steamos-nvidia.sh
 ```
 
 To update only the persistent installer and recovery hooks without rebuilding
@@ -285,8 +288,9 @@ sudo systemctl restart sddm
 - Installs the current signed Arch NVIDIA user-space bundle and builds the
   `nvidia-open-dkms` kernel module for the running SteamOS kernel.
 - Keeps DKMS state and large runtime assets under `/home/.steamos-nvidia`, and
-  removes temporary compiler/header packages after the module build, to fit
-  SteamOS's small root partition.
+  removes only compiler/header packages that the installer introduced, to fit
+  SteamOS's small root partition without removing pre-existing development
+  tools.
 - On NVIDIA-only systems, removes unneeded Intel/AMD graphics runtime packages
   before installing the NVIDIA stack.
 - Disables Nouveau, enables `nvidia_drm` modesetting/fbdev, rebuilds initramfs,
@@ -298,6 +302,13 @@ sudo systemctl restart sddm
   root slot lacks it. After a successful repair, the service schedules a single
   automatic reboot with a 60-second grace period so the new display module can
   take over on the next boot.
+- Stores each SteamOS build's large runtime offloads in a separate generation,
+  atomically switches the current slot to its matching generation, and keeps
+  the three newest generations for A/B rollback. This prevents files removed by
+  a newer SteamOS build from lingering in a shared `/usr` tree.
+- Restores SteamOS read-only mode after a successful install or maintenance
+  refresh. Set `STEAMOS_NVIDIA_RESTORE_READONLY=no` only when deliberately
+  debugging a writable root.
 - Enables SSH during repair and falls back to Nouveau after a failed rebuild,
   avoiding a permanently unreachable black-screen system.
 
@@ -329,6 +340,16 @@ parts:
 
 The keep-list preserves the configuration handoff; the ensure service performs
 the rebuild/reinstall that a fresh root slot may still need.
+
+Large directories moved off the 5 GiB root filesystem are stored beneath
+`/home/.steamos-nvidia/offload/runtime/<BUILD_ID>`. On every boot, the ensure
+service compares the active SteamOS `BUILD_ID` with the recorded offload
+generation before accepting an already-loaded NVIDIA driver. When the build
+changes, it stages exact copies of the new slot's lower `/usr` directories,
+switches their bind mounts only after the copies succeed, updates that slot's
+`fstab`, and then reclaims the hidden duplicates from the small root. The prior
+generations remain independent for rollback rather than being merged with the
+new build.
 
 If SteamOS updates into a black screen, try a local TTY with `Ctrl+Alt+F2` or
 `Ctrl+Alt+F3`, log in, and re-enable SSH:
