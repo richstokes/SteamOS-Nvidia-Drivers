@@ -899,7 +899,8 @@ make_root_writable() {
 
 restore_root_readonly() {
   command -v steamos-readonly >/dev/null 2>&1 || return 0
-  steamos-readonly enable || logger -t steamos-nvidia-ensure "Could not restore SteamOS read-only mode after fallback preparation"
+  steamos-readonly status >/dev/null 2>&1 && return 0
+  steamos-readonly enable || logger -t steamos-nvidia-ensure "Could not restore SteamOS read-only mode"
 }
 
 nvidia_active() {
@@ -913,6 +914,9 @@ refresh_runtime_offloads || true
 
 if nvidia_active; then
   rm -f "\$FALLBACK_MARKER" "\$ACTIVATION_MARKER"
+  # Current SteamOS initramfs explicitly mounts the Btrfs root read-write on
+  # every boot. Restore the requested steady state after persistence checks.
+  restore_root_readonly
   exit 0
 fi
 
@@ -936,6 +940,7 @@ fi
 if (( installer_succeeded )); then
   if nvidia_active; then
     rm -f "\$FALLBACK_MARKER" "\$ACTIVATION_MARKER"
+    restore_root_readonly
     exit 0
   fi
 
@@ -1021,7 +1026,9 @@ EOF
 nvidia_active() {
   command -v nvidia-smi >/dev/null 2>&1 || return 1
   nvidia-smi >/dev/null 2>&1 || return 1
-  ! lsmod | awk '{print $1}' | grep -qx nouveau
+  if lsmod | awk '{print $1}' | grep -qx nouveau; then
+    return 1
+  fi
   lsmod | awk '{print $1}' | grep -qx nvidia_drm
 }
 
