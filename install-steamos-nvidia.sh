@@ -18,6 +18,7 @@ RUNTIME_OFFLOAD_MARKER=${STEAMOS_NVIDIA_RUNTIME_OFFLOAD_MARKER:-$STATE_DIR/runti
 DKMS_PACKAGE=nvidia-open-dkms
 REBOOT=${STEAMOS_NVIDIA_REBOOT:-prompt} # prompt, yes, no
 RESTORE_READONLY=${STEAMOS_NVIDIA_RESTORE_READONLY:-yes} # yes, no
+ROOT_READONLY_RESTORE_PENDING=0
 
 ARCH_NVIDIA_PACKAGES=(
   nvidia-utils
@@ -52,12 +53,19 @@ log() {
 
 die() {
   log "ERROR: $*"
+  if (( ROOT_READONLY_RESTORE_PENDING )); then
+    ROOT_READONLY_RESTORE_PENDING=0
+    trap - ERR
+    restore_root_readonly || true
+  fi
   exit 1
 }
 
 on_error() {
   local line=$1 status=$2
+  trap - ERR
   log "ERROR: command failed at line $line with status $status"
+  restore_root_readonly || true
   exit "$status"
 }
 
@@ -152,6 +160,7 @@ is_exact_mountpoint() {
 }
 
 make_root_writable() {
+  ROOT_READONLY_RESTORE_PENDING=1
   if command -v steamos-readonly >/dev/null 2>&1; then
     steamos-readonly disable || true
   elif findmnt -no OPTIONS / | tr ',' '\n' | grep -qx ro; then
@@ -164,6 +173,7 @@ restore_root_readonly() {
     yes)
       ;;
     no)
+      ROOT_READONLY_RESTORE_PENDING=0
       log "Leaving SteamOS read-only mode disabled by request"
       return 0
       ;;
@@ -173,6 +183,7 @@ restore_root_readonly() {
   esac
 
   if ! command -v steamos-readonly >/dev/null 2>&1; then
+    ROOT_READONLY_RESTORE_PENDING=0
     log "SteamOS read-only helper is unavailable; root remains writable"
     return 0
   fi
@@ -182,6 +193,7 @@ restore_root_readonly() {
   else
     log "WARNING: could not restore SteamOS read-only mode"
   fi
+  ROOT_READONLY_RESTORE_PENDING=0
 }
 
 init_pacman_keyring() {
@@ -216,6 +228,64 @@ header_package_for_kernel() {
   die "Could not find matching kernel headers for package base '$pkgbase'"
 }
 
+install_matching_kernel_headers() {
+  local kernel=$1 pkgbase=$2 headers=$3
+  local kernel_version installed_version='' available_version repo server architecture
+  local filename cache_dir package signature version_for_filename
+
+  kernel_version=$(pacman -Q "$pkgbase" | awk '{ print $2 }')
+  [[ -n "$kernel_version" ]] || {
+    log "ERROR: could not determine installed version of $pkgbase"
+    return 1
+  }
+
+  installed_version=$(pacman -Q "$headers" 2>/dev/null | awk '{ print $2 }' || true)
+  if [[ "$installed_version" == "$kernel_version" && -d "/usr/lib/modules/$kernel/build" ]]; then
+    log "Matching kernel headers $headers $kernel_version are already installed"
+    return 0
+  fi
+
+  available_version=$(pacman -Si "$headers" | awk '$1 == "Version" { print $3; exit }')
+  if [[ "$available_version" == "$kernel_version" ]]; then
+    pacman -S --noconfirm "$headers"
+  else
+    # SteamOS package databases roll forward independently of an already
+    # booted A/B image. Valve's mirror retains versioned package artifacts, so
+    # fetch the headers matching the installed kernel instead of installing a
+    # newer, unusable header tree from the current database.
+    require_command curl
+    require_command pacman-conf
+    repo=$(pacman -Si "$headers" | awk '$1 == "Repository" { print $3; exit }')
+    server=$(pacman-conf -r "$repo" Server | head -n1)
+    architecture=$(pacman-conf Architecture | head -n1)
+    version_for_filename=${kernel_version#*:}
+    filename="$headers-$version_for_filename-$architecture.pkg.tar.zst"
+    cache_dir="$STATE_DIR/kernel-headers"
+    package="$cache_dir/$filename"
+    signature="$package.sig"
+
+    [[ -n "$repo" && -n "$server" && -n "$architecture" ]] || {
+      log "ERROR: could not resolve the SteamOS repository URL for $headers"
+      return 1
+    }
+
+    install -d -m 0755 "$cache_dir"
+    log "Repository has $headers $available_version; retrieving exact $kernel_version headers for running kernel $kernel"
+    curl --fail --location --retry 3 --output "$package.tmp" "$server/$filename"
+    mv -f "$package.tmp" "$package"
+    curl --fail --location --retry 3 --output "$signature.tmp" "$server/$filename.sig"
+    mv -f "$signature.tmp" "$signature"
+    pacman-key --verify "$signature" "$package"
+    pacman -U --noconfirm "$package"
+  fi
+
+  installed_version=$(pacman -Q "$headers" 2>/dev/null | awk '{ print $2 }' || true)
+  if [[ "$installed_version" != "$kernel_version" || ! -d "/usr/lib/modules/$kernel/build" ]]; then
+    log "ERROR: $headers $installed_version does not provide headers for running kernel $kernel ($kernel_version)"
+    return 1
+  fi
+}
+
 configure_dkms_workspace() {
   install -d -m 0755 "$STATE_DIR"
   install -d -m 0755 "$DKMS_DIR" "$DKMS_TMP_DIR" /etc/dkms/framework.conf.d
@@ -237,6 +307,7 @@ EOF
 install_build_stack() {
   local kernel pkgbase headers pkg
   local cleanup_candidates=()
+  pacman -Sy --noconfirm
   kernel=$(uname -r)
   pkgbase=$(kernel_pkgbase "$kernel")
   headers=$(header_package_for_kernel "$pkgbase")
@@ -253,8 +324,8 @@ install_build_stack() {
   } | sort -u | write_file_atomically "$BUILD_PACKAGE_STATE" 0644
 
   log "Installing SteamOS DKMS build stack for $kernel using $headers"
-  pacman -Sy --noconfirm
-  pacman -S --noconfirm "$headers" dkms "${BUILD_PACKAGES[@]}"
+  install_matching_kernel_headers "$kernel" "$pkgbase" "$headers"
+  pacman -S --noconfirm dkms "${BUILD_PACKAGES[@]}"
 }
 
 prepare_arch_nvidia_bundle() {
@@ -289,7 +360,9 @@ Server = https://geo.mirror.pkgbuild.com/multilib/os/\$arch
 EOF
 
   pacman --config "$ARCH_NVIDIA_CONFIG" -Sy --noconfirm
-  pacman --config "$ARCH_NVIDIA_CONFIG" -Sw --needed --noconfirm "${ARCH_NVIDIA_PACKAGES[@]}"
+  # Always populate the freshly recreated cache. --needed consults the copied
+  # local database and would skip every package on a retry after a partial run.
+  pacman --config "$ARCH_NVIDIA_CONFIG" -Sw --noconfirm "${ARCH_NVIDIA_PACKAGES[@]}"
 }
 
 install_arch_nvidia_bundle() {
