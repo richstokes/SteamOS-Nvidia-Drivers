@@ -86,6 +86,24 @@ install_self() {
   install -m 0755 "$source" "$destination"
 }
 
+write_file_atomically() {
+  local destination=$1 mode=$2 directory temporary
+  directory=$(dirname "$destination")
+  install -d -m 0755 "$directory"
+  temporary=$(mktemp "$directory/.${destination##*/}.XXXXXX")
+
+  if ! cat >"$temporary"; then
+    rm -f "$temporary"
+    return 1
+  fi
+
+  chmod "$mode" "$temporary" || {
+    rm -f "$temporary"
+    return 1
+  }
+  mv -f "$temporary" "$destination"
+}
+
 has_nvidia_gpu() {
   local vendor
   for vendor in /sys/bus/pci/devices/*/vendor; do
@@ -547,13 +565,40 @@ install_persistence_hooks() {
   install_self "$PERSISTENT_INSTALL"
   install_self /etc/steamos-nvidia/install
 
-  cat >/etc/steamos-nvidia/ensure <<EOF
+  # The ensure wrapper can be the process invoking this installer. Replace it
+  # atomically so its shell keeps reading the old inode until that run exits.
+  # Truncating it in place can make Bash parse a mixture of old and new text.
+  write_file_atomically /etc/steamos-nvidia/ensure 0755 <<EOF
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
 PERSISTENT_INSTALL=$PERSISTENT_INSTALL
 FALLBACK_MARKER=$FALLBACK_MARKER
 ACTIVATION_MARKER=$STATE_DIR/nvidia-activation-reboot-requested
+REBOOT_DELAY_SEC=\${STEAMOS_NVIDIA_REBOOT_DELAY_SEC:-60}
+
+schedule_reboot() {
+  local reason=\$1
+
+  if [[ ! \$REBOOT_DELAY_SEC =~ ^[0-9]+$ ]]; then
+    logger -t steamos-nvidia-ensure "Invalid reboot delay '\$REBOOT_DELAY_SEC'; using 60 seconds"
+    REBOOT_DELAY_SEC=60
+  fi
+
+  logger -t steamos-nvidia-ensure "\$reason; scheduling reboot in \$REBOOT_DELAY_SEC seconds"
+  systemctl stop steamos-nvidia-reboot.timer >/dev/null 2>&1 || true
+  if systemd-run --quiet \
+      --unit=steamos-nvidia-reboot \
+      --on-active="\${REBOOT_DELAY_SEC}s" \
+      --timer-property=AccuracySec=1s \
+      --property=Type=oneshot \
+      /usr/bin/systemctl reboot; then
+    return 0
+  fi
+
+  logger -t steamos-nvidia-ensure "Unable to schedule delayed reboot; rebooting immediately"
+  systemctl reboot
+}
 
 nvidia_active() {
   command -v nvidia-smi >/dev/null 2>&1 || return 1
@@ -592,8 +637,7 @@ if (( installer_succeeded )); then
 
   if [[ ! -e "\$ACTIVATION_MARKER" ]]; then
     touch "\$ACTIVATION_MARKER"
-    logger -t steamos-nvidia-ensure "NVIDIA installed; rebooting once to activate the new kernel module"
-    systemctl reboot
+    schedule_reboot "NVIDIA installed; one reboot is required to activate the new kernel module"
     exit 0
   fi
 
@@ -612,13 +656,11 @@ fi
 
 if [[ ! -e "\$FALLBACK_MARKER" ]]; then
   touch "\$FALLBACK_MARKER"
-  logger -t steamos-nvidia-ensure "Rebooting once into Nouveau fallback after failed NVIDIA reinstall"
-  systemctl reboot || true
+  schedule_reboot "NVIDIA reinstall failed; one reboot into Nouveau fallback is required"
 fi
 EOF
-  chmod 0755 /etc/steamos-nvidia/ensure
 
-  cat >/etc/systemd/system/steamos-nvidia-ensure.service <<'EOF'
+  write_file_atomically /etc/systemd/system/steamos-nvidia-ensure.service 0644 <<'EOF'
 [Unit]
 Description=Ensure NVIDIA driver stack is installed after SteamOS updates
 Wants=network-online.target
@@ -716,11 +758,28 @@ maybe_reboot() {
 }
 
 main() {
+  local mode=${1:-install}
+
   trap 'on_error "$LINENO" "$?"' ERR
   require_root "$@"
-  require_command pacman
   require_command flock
   acquire_lock
+
+  case "$mode" in
+    install)
+      ;;
+    --refresh-persistence)
+      make_root_writable
+      install_persistence_hooks
+      log "Refreshed persistent installer and boot-time recovery hooks"
+      return 0
+      ;;
+    *)
+      die "Usage: $0 [--refresh-persistence]"
+      ;;
+  esac
+
+  require_command pacman
 
   has_nvidia_gpu || die "No NVIDIA PCI GPU detected"
   make_root_writable

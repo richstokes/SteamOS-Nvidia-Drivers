@@ -171,7 +171,13 @@ The installer uses two deliberately different sources:
   NVIDIA `.run` installer.
 
 For a SteamOS kernel update, the boot-time ensure service reruns the persistent
-installer and DKMS rebuilds the module for the kernel in the new root slot.
+installer and DKMS rebuilds the module for the kernel in the new root slot. If
+the rebuilt display module cannot be activated in the running boot, the service
+schedules one automatic reboot after a 60-second grace period. This is
+deliberately automatic because the display may still be blank and no local
+prompt would be visible. To cancel a pending recovery reboot while diagnosing
+over SSH, run `sudo systemctl stop steamos-nvidia-reboot.timer` during the grace
+period.
 
 If you prefer to reboot manually, use:
 
@@ -187,6 +193,14 @@ Useful environment overrides:
 ```bash
 # Reboot automatically after installation.
 STEAMOS_NVIDIA_REBOOT=yes sudo ./install-steamos-nvidia.sh
+```
+
+To update only the persistent installer and recovery hooks without rebuilding
+or reinstalling the NVIDIA driver, run the following. This mode does not
+reboot the machine:
+
+```bash
+sudo ./install-steamos-nvidia.sh --refresh-persistence
 ```
 
 ### 6. Verify
@@ -281,7 +295,9 @@ sudo systemctl restart sddm
   `1920x1080@60` output and HDR, VRR, and color-management advertising off.
 - Preserves its configuration through atomic A/B updates and installs a
   boot-time repair service that rebuilds/reinstalls the NVIDIA stack when a new
-  root slot lacks it.
+  root slot lacks it. After a successful repair, the service schedules a single
+  automatic reboot with a 60-second grace period so the new display module can
+  take over on the next boot.
 - Enables SSH during repair and falls back to Nouveau after a failed rebuild,
   avoiding a permanently unreachable black-screen system.
 
@@ -305,7 +321,11 @@ parts:
    first boot after an update, that service checks whether the NVIDIA module
    and runtime are actually usable. If the new root slot is missing pacman/DKMS
    state, it reruns the persistent installer from `/home/.steamos-nvidia/install`
-   with `STEAMOS_NVIDIA_REBOOT=no`.
+   with `STEAMOS_NVIDIA_REBOOT=no`. The wrapper owns reboot policy in this path:
+   after a successful repair it schedules one reboot after 60 seconds, then
+   verifies NVIDIA DRM on the following boot. If that activation still fails,
+   it removes the NVIDIA-only boot configuration and schedules one reboot into
+   Nouveau fallback.
 
 The keep-list preserves the configuration handoff; the ensure service performs
 the rebuild/reinstall that a fresh root slot may still need.
