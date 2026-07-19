@@ -450,6 +450,15 @@ offload_root_directory() {
     rm -rf "$staging"
     return 1
   fi
+  # SteamOS mounts are shared. Without making this temporary view private, the
+  # later bind onto source_dir propagates into lower_view as another mount
+  # layer, so a single cleanup umount merely reveals the layer underneath.
+  if ! mount --make-private "$lower_view"; then
+    umount "$lower_view" || true
+    rmdir "$lower_view" || true
+    rm -rf "$staging"
+    return 1
+  fi
   lower_marker="$lower_view/.steamos-nvidia-offloaded"
 
   if [[ -e "$lower_marker" ]]; then
