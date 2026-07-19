@@ -286,7 +286,10 @@ sudo systemctl restart sddm
 ## What the installer does
 
 - Installs the current signed Arch NVIDIA user-space bundle and builds the
-  `nvidia-open-dkms` kernel module for the running SteamOS kernel.
+  `nvidia-open-dkms` kernel module for the running SteamOS kernel. If the
+  SteamOS repository has already rolled to a newer kernel, it retrieves and
+  verifies the retained header package matching the kernel that is actually
+  running instead of installing incompatible newer headers.
 - Keeps DKMS state and large runtime assets under `/home/.steamos-nvidia`, and
   removes only compiler/header packages that the installer introduced, to fit
   SteamOS's small root partition without removing pre-existing development
@@ -306,8 +309,8 @@ sudo systemctl restart sddm
   atomically switches the current slot to its matching generation, and keeps
   the three newest generations for A/B rollback. This prevents files removed by
   a newer SteamOS build from lingering in a shared `/usr` tree.
-- Restores SteamOS read-only mode after a successful install or maintenance
-  refresh. Set `STEAMOS_NVIDIA_RESTORE_READONLY=no` only when deliberately
+- Restores SteamOS read-only mode after installs, maintenance refreshes, and
+  failed runs. Set `STEAMOS_NVIDIA_RESTORE_READONLY=no` only when deliberately
   debugging a writable root.
 - Enables SSH during repair and falls back to Nouveau after a failed rebuild,
   avoiding a permanently unreachable black-screen system.
