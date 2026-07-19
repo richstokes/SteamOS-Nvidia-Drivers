@@ -73,7 +73,7 @@ to_vfio() {
 }
 
 to_host() {
-  local device current failed=0
+  local device current failed=0 gpu_was_vfio=0
   verify_group >/dev/null
 
   systemctl stop display-manager.service || true
@@ -82,6 +82,7 @@ to_host() {
   for device in "${EXPECTED_DEVICES[@]}"; do
     current=$(driver_for "$device")
     if [[ "$current" == vfio-pci ]]; then
+      [[ "$device" != "$GPU_BDF" ]] || gpu_was_vfio=1
       printf '%s\n' "$device" > /sys/bus/pci/drivers/vfio-pci/unbind
     fi
     printf '\n' >"/sys/bus/pci/devices/$device/driver_override"
@@ -89,7 +90,7 @@ to_host() {
 
   # FLR on the graphics function also resets the paired audio function. A
   # failed reset is non-fatal; the normal PCI probe often works without it.
-  if [[ -w "/sys/bus/pci/devices/$GPU_BDF/reset" ]]; then
+  if ((gpu_was_vfio)) && [[ -w "/sys/bus/pci/devices/$GPU_BDF/reset" ]]; then
     printf '1\n' >"/sys/bus/pci/devices/$GPU_BDF/reset" || true
   fi
 

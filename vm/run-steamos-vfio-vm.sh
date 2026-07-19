@@ -28,13 +28,16 @@ podman_vm() {
 }
 
 cleanup() {
-  local status=$?
+  local status=$? restore_status=0
   ((cleanup_running)) && exit "$status"
   cleanup_running=1
   trap - EXIT INT TERM HUP
   podman_vm rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
   if ((handoff_started)); then
-    "$SCRIPT_DIR/vfio-gpu-bind.sh" to-host || true
+    "$SCRIPT_DIR/vfio-gpu-bind.sh" to-host || restore_status=$?
+  fi
+  if ((status == 0 && restore_status != 0)); then
+    status=$restore_status
   fi
   exit "$status"
 }
